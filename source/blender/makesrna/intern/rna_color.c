@@ -762,6 +762,10 @@ static void rna_def_curvemap(BlenderRNA *brna)
 	RNA_def_property_enum_items(prop, prop_extend_items);
 	RNA_def_property_ui_text(prop, "Extend", "Extrapolate the curve or extend it horizontally");
 
+	prop = RNA_def_property(srna, "auto_smoothing", PROP_BOOLEAN, PROP_NONE);
+	RNA_def_property_boolean_sdna(prop, NULL, "flag", CUMA_SMOOTH_HANDLES);
+	RNA_def_property_ui_text(prop, "Smoothed Auto Handles", "Uses new auto-handle placement algorithm that produces more smooth curves");
+
 	prop = RNA_def_property(srna, "points", PROP_COLLECTION, PROP_NONE);
 	RNA_def_property_collection_sdna(prop, NULL, "curve", "totpoint");
 	RNA_def_property_struct_type(prop, "CurveMapPoint");

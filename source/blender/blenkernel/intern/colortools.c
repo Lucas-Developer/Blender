@@ -432,6 +432,9 @@ static void calchandle_curvemap(
 	float len, len_a, len_b;
 	float dvec_a[2], dvec_b[2];
 
+	/* assume normal handle until we check */
+	bezt->f5 = HD_AUTOTYPE_NORMAL;
+
 	if (bezt->h1 == 0 && bezt->h2 == 0) {
 		return;
 	}
@@ -486,6 +489,7 @@ static void calchandle_curvemap(
 					    (ydiff1 >= 0.0f && ydiff2 >= 0.0f))
 					{
 						bezt->vec[0][1] = bezt->vec[1][1];
+						bezt->f5 = HD_AUTOTYPE_SPECIAL;
 					}
 					else { /* handles should not be beyond y coord of two others */
 						if (ydiff1 <= 0.0f) {
@@ -512,6 +516,7 @@ static void calchandle_curvemap(
 					    (ydiff1 >= 0.0f && ydiff2 >= 0.0f))
 					{
 						bezt->vec[2][1] = bezt->vec[1][1];
+						bezt->f5 = HD_AUTOTYPE_SPECIAL;
 					}
 					else { /* handles should not be beyond y coord of two others */
 						if (ydiff1 <= 0.0f) {
@@ -612,45 +617,51 @@ static void curvemap_make_table(CurveMap *cuma, const rctf *clipr)
 		bezt_prev = &bezt[a];
 	}
 	
-	/* first and last handle need correction, instead of pointing to center of next/prev, 
-	 * we let it point to the closest handle */
-	if (cuma->totpoint > 2) {
-		float hlen, nlen, vec[3];
-		
-		if (bezt[0].h2 == HD_AUTO) {
-			
-			hlen = len_v3v3(bezt[0].vec[1], bezt[0].vec[2]); /* original handle length */
-			/* clip handle point */
-			copy_v3_v3(vec, bezt[1].vec[0]);
-			if (vec[0] < bezt[0].vec[1][0])
-				vec[0] = bezt[0].vec[1][0];
-			
-			sub_v3_v3(vec, bezt[0].vec[1]);
-			nlen = len_v3(vec);
-			if (nlen > FLT_EPSILON) {
-				mul_v3_fl(vec, hlen / nlen);
-				add_v3_v3v3(bezt[0].vec[2], vec, bezt[0].vec[1]);
-				sub_v3_v3v3(bezt[0].vec[0], bezt[0].vec[1], vec);
+	if (cuma->flag & CUMA_SMOOTH_HANDLES) {
+		BKE_nurb_handle_smooth_color_curve(bezt, cuma->totpoint);
+	}
+	else {
+		/* first and last handle need correction, instead of pointing to center of next/prev,
+		 * we let it point to the closest handle */
+		if (cuma->totpoint > 2) {
+			float hlen, nlen, vec[3];
+
+			if (bezt[0].h2 == HD_AUTO) {
+
+				hlen = len_v3v3(bezt[0].vec[1], bezt[0].vec[2]); /* original handle length */
+				/* clip handle point */
+				copy_v3_v3(vec, bezt[1].vec[0]);
+				if (vec[0] < bezt[0].vec[1][0])
+					vec[0] = bezt[0].vec[1][0];
+
+				sub_v3_v3(vec, bezt[0].vec[1]);
+				nlen = len_v3(vec);
+				if (nlen > FLT_EPSILON) {
+					mul_v3_fl(vec, hlen / nlen);
+					add_v3_v3v3(bezt[0].vec[2], vec, bezt[0].vec[1]);
+					sub_v3_v3v3(bezt[0].vec[0], bezt[0].vec[1], vec);
+				}
 			}
-		}
-		a = cuma->totpoint - 1;
-		if (bezt[a].h2 == HD_AUTO) {
-			
-			hlen = len_v3v3(bezt[a].vec[1], bezt[a].vec[0]); /* original handle length */
-			/* clip handle point */
-			copy_v3_v3(vec, bezt[a - 1].vec[2]);
-			if (vec[0] > bezt[a].vec[1][0])
-				vec[0] = bezt[a].vec[1][0];
-			
-			sub_v3_v3(vec, bezt[a].vec[1]);
-			nlen = len_v3(vec);
-			if (nlen > FLT_EPSILON) {
-				mul_v3_fl(vec, hlen / nlen);
-				add_v3_v3v3(bezt[a].vec[0], vec, bezt[a].vec[1]);
-				sub_v3_v3v3(bezt[a].vec[2], bezt[a].vec[1], vec);
+			a = cuma->totpoint - 1;
+			if (bezt[a].h2 == HD_AUTO) {
+
+				hlen = len_v3v3(bezt[a].vec[1], bezt[a].vec[0]); /* original handle length */
+				/* clip handle point */
+				copy_v3_v3(vec, bezt[a - 1].vec[2]);
+				if (vec[0] > bezt[a].vec[1][0])
+					vec[0] = bezt[a].vec[1][0];
+
+				sub_v3_v3(vec, bezt[a].vec[1]);
+				nlen = len_v3(vec);
+				if (nlen > FLT_EPSILON) {
+					mul_v3_fl(vec, hlen / nlen);
+					add_v3_v3v3(bezt[a].vec[0], vec, bezt[a].vec[1]);
+					sub_v3_v3v3(bezt[a].vec[2], bezt[a].vec[1], vec);
+				}
 			}
 		}
 	}
+
 	/* make the bezier curve */
 	if (cuma->table)
 		MEM_freeN(cuma->table);

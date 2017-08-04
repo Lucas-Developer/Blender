@@ -3137,7 +3137,7 @@ void BKE_curve_bevelList_make(Object *ob, ListBase *nurbs, bool for_render)
 
 static void calchandleNurb_intern(
         BezTriple *bezt, const BezTriple *prev, const BezTriple *next,
-        bool is_fcurve, bool skip_align)
+        bool is_fcurve, bool skip_align, bool fcurve_smoothing)
 {
 	/* defines to avoid confusion */
 #define p2_h1 ((p2) - 3)
@@ -3150,6 +3150,9 @@ static void calchandleNurb_intern(
 	float len, len_a, len_b;
 	float len_ratio;
 	const float eps = 1e-5;
+
+	/* assume normal handle until we check */
+	bezt->f5 = HD_AUTOTYPE_NORMAL;
 
 	if (bezt->h1 == 0 && bezt->h2 == 0) {
 		return;
@@ -3202,7 +3205,13 @@ static void calchandleNurb_intern(
 		tvec[2] = dvec_b[2] / len_b + dvec_a[2] / len_a;
 
 		if (is_fcurve) {
-			len = tvec[0];
+			if (fcurve_smoothing) {
+				/* force the handlers transition to be 1/3 */
+				len = 6.0f/2.5614f;
+			}
+			else {
+				len = tvec[0];
+			}
 		}
 		else {
 			len = len_v3(tvec);
@@ -3213,10 +3222,12 @@ static void calchandleNurb_intern(
 			/* only for fcurves */
 			bool leftviolate = false, rightviolate = false;
 
-			if (len_a > 5.0f * len_b)
-				len_a = 5.0f * len_b;
-			if (len_b > 5.0f * len_a)
-				len_b = 5.0f * len_a;
+			if (!is_fcurve || !fcurve_smoothing) {
+				if (len_a > 5.0f * len_b)
+					len_a = 5.0f * len_b;
+				if (len_b > 5.0f * len_a)
+					len_b = 5.0f * len_a;
+			}
 
 			if (ELEM(bezt->h1, HD_AUTO, HD_AUTO_ANIM)) {
 				len_a /= len;
@@ -3227,6 +3238,7 @@ static void calchandleNurb_intern(
 					float ydiff2 = next->vec[1][1] - bezt->vec[1][1];
 					if ((ydiff1 <= 0.0f && ydiff2 <= 0.0f) || (ydiff1 >= 0.0f && ydiff2 >= 0.0f)) {
 						bezt->vec[0][1] = bezt->vec[1][1];
+						bezt->f5 = HD_AUTOTYPE_SPECIAL;
 					}
 					else { /* handles should not be beyond y coord of two others */
 						if (ydiff1 <= 0.0f) {
@@ -3253,6 +3265,7 @@ static void calchandleNurb_intern(
 					float ydiff2 = next->vec[1][1] - bezt->vec[1][1];
 					if ( (ydiff1 <= 0.0f && ydiff2 <= 0.0f) || (ydiff1 >= 0.0f && ydiff2 >= 0.0f) ) {
 						bezt->vec[2][1] = bezt->vec[1][1];
+						bezt->f5 = HD_AUTOTYPE_SPECIAL;
 					}
 					else { /* handles should not be beyond y coord of two others */
 						if (ydiff1 <= 0.0f) {
@@ -3400,7 +3413,7 @@ static void calchandlesNurb_intern(Nurb *nu, bool skip_align)
 	next = bezt + 1;
 
 	while (a--) {
-		calchandleNurb_intern(bezt, prev, next, 0, skip_align);
+		calchandleNurb_intern(bezt, prev, next, 0, skip_align, 0);
 		prev = bezt;
 		if (a == 1) {
 			if (nu->flagu & CU_NURB_CYCLIC)
@@ -3415,9 +3428,1081 @@ static void calchandlesNurb_intern(Nurb *nu, bool skip_align)
 	}
 }
 
-void BKE_nurb_handle_calc(BezTriple *bezt, BezTriple *prev, BezTriple *next, const bool is_fcurve)
+typedef float vec4[4];
+
+static void *allocate_arrays(int count, vec4 ***vectors, float ***floats, char ***chars, const char *name)
 {
-	calchandleNurb_intern(bezt, prev, next, is_fcurve, false);
+	int num_vectors = 0, num_floats = 0, num_chars = 0;
+
+	while (vectors && vectors[num_vectors]) {
+		num_vectors++;
+	}
+
+	while (floats && floats[num_floats]) {
+		num_floats++;
+	}
+
+	while (chars && chars[num_chars]) {
+		num_chars++;
+	}
+
+	void *buffer = (float*)MEM_mallocN(count * (sizeof(vec4)*num_vectors + sizeof(float)*num_floats + num_chars), name);
+
+	if (!buffer)
+		return NULL;
+
+	vec4 *vptr = buffer;
+
+	for (int i = 0; i < num_vectors; i++, vptr += count)
+		*vectors[i] = vptr;
+
+	float *fptr = (float*)vptr;
+
+	for (int i = 0; i < num_floats; i++, fptr += count)
+		*floats[i] = fptr;
+
+	char *cptr = (char*)fptr;
+
+	for (int i = 0; i < num_chars; i++, cptr += count)
+		*chars[i] = cptr;
+
+	return buffer;
+}
+
+/* computes in which direction to change h[i] to satisfy conditions better */
+static float bezier_relax_direction(float *a, float *b, float *c, float *d, float *h, int i, int count)
+{
+	/* current deviation between sides of the equation */
+	float state = a[i] * h[(i+count-1)%count] + b[i] * h[i] + c[i] * h[(i+1)%count] - d[i];
+
+	/* only the sign is meaningful */
+	return -state * b[i];
+}
+
+static void bezier_lock_unknown(float *a, float *b, float *c, float *d, int i, float value)
+{
+	a[i] = c[i] = 0.0f;
+	b[i] = 1.0f;
+	d[i] = value;
+}
+
+static bool tridiagonal_solve_with_limits(float *a, float *b, float *c, float *d, float *h, float *hmin, float *hmax, int solve_count)
+{
+	float *a0, *b0, *c0, *d0;
+	float **arrays[] = { &a0, &b0, &c0, &d0, NULL };
+	char *is_locked, *num_unlocks;
+	char **flagarrays[] = { &is_locked, &num_unlocks, NULL };
+
+	void *tmps = allocate_arrays(solve_count, NULL, arrays, flagarrays, "tridiagonal_solve_with_limits");
+	if (!tmps)
+		return false;
+
+	memcpy(a0, a, sizeof(float)*solve_count);
+	memcpy(b0, b, sizeof(float)*solve_count);
+	memcpy(c0, c, sizeof(float)*solve_count);
+	memcpy(d0, d, sizeof(float)*solve_count);
+
+	memset(is_locked, 0, solve_count);
+	memset(num_unlocks, 0, solve_count);
+
+	bool overshoot, unlocked;
+
+	do
+	{
+		if (!BLI_tridiagonal_solve_cyclic(a, b, c, d, h, solve_count)) {
+			MEM_freeN(tmps);
+			return false;
+		}
+
+		/* first check if any handles overshoot the limits, and lock them */
+		bool all = false, locked = false;
+
+		overshoot = unlocked = false;
+
+		do
+		{
+			for (int i = 0; i < solve_count; i++) {
+				if (h[i] >= hmin[i] && h[i] <= hmax[i])
+					continue;
+
+				overshoot = true;
+
+				float target = h[i] > hmax[i] ? hmax[i] : hmin[i];
+
+				/* heuristically only lock handles that go in the right direction if there are such ones */
+				if (target != 0.0f || all) {
+					/* mark item locked */
+					is_locked[i] = 1;
+
+					bezier_lock_unknown(a, b, c, d, i, target);
+					locked = true;
+				}
+			}
+
+			all = true;
+		}
+		while (overshoot && !locked);
+
+		/* if no handles overshot and were locked, see if it may be a good idea to unlock some handles */
+		if (!locked) {
+			for (int i = 0; i < solve_count; i++) {
+				// to definitely avoid infinite loops limit this to 2 times
+				if (!is_locked[i] || num_unlocks[i] >= 2)
+					continue;
+
+				/* if the handle wants to move in allowable direction, release it */
+				float relax = bezier_relax_direction(a0, b0, c0, d0, h, i, solve_count);
+
+				if ((relax > 0 && h[i] < hmax[i]) || (relax < 0 && h[i] > hmin[i])) {
+					/* restore equation coefficients */
+					a[i] = a0[i]; b[i] = b0[i]; c[i] = c0[i]; d[i] = d0[i];
+
+					is_locked[i] = 0;
+					num_unlocks[i]++;
+					unlocked = true;
+				}
+			}
+		}
+	}
+	while (overshoot || unlocked);
+
+	MEM_freeN(tmps);
+	return true;
+}
+
+/*
+ * This function computes the handles of a series of auto bezier points
+ * on the basis of 'no acceleration discontinuities' at the points.
+ * The first and last bezier points are considered 'fixed' (their handles are not touched)
+ * The result is the smoothest possible trajectory going through intemediate points.
+ * The difficulty is that the handles depends on their neighbours.
+ *
+ * The exact solution is found by solving a tridiagonal matrix equation formed
+ * by the continuity and boundary conditions. Although theoretically handle position
+ * is affected by all other points of the curve segment, in practice the influence
+ * decreases exponentially with distance.
+ *
+ * Note: this algorithm assumes that the handle horizontal size if always 1/3 of the
+ * of the interval to the next point. This rule ensures linear interpolation of time.
+ *
+ * ^ height (co 1)
+ * |                                            yN
+ * |                                   yN-1     |
+ * |                      y2           |        |
+ * |           y1         |            |        |
+ * |    y0     |          |            |        |
+ * |    |      |          |            |        |
+ * |    |      |          |            |        |
+ * |    |      |          |            |        |
+ * |-------t1---------t2--------- ~ --------tN-------------------> time (co 0)
+ *
+ *
+ * Mathematical basis:
+ *
+ *   1. Handle lengths on either side of each point are connected by a factor
+ *      ensuring continuity of the first derivative:
+ *
+ *      l[i] = t[i+1]/t[i]
+ *
+ *   2. The tridiagonal system is formed by the following equation, which is derived
+ *      by differentiating the bezier curve and specifies second derivative continuity
+ *      at every point:
+ *
+ *      l[i]^2 * h[i-1] + (2*l[i]+2) * h[i] + 1/l[i+1] * h[i+1] = (y[i]-y[i-1])*l[i]^2 + y[i+1]-y[i]
+ *
+ *   3. If this point is adjacent to a manually set handle with X size not equal to 1/3
+ *      of the horizontal interval, this equation becomes slightly more complex:
+ *
+ *      l[i]^2 * h[i-1] + (3*(1-R[i-1])*l[i] + 3*(1-L[i+1])) * h[i] + 1/l[i+1] * h[i+1] = (y[i]-y[i-1])*l[i]^2 + y[i+1]-y[i]
+ *
+ *      The difference between equations amounts to this, and it's obvious that when R[i-1]
+ *      and L[i+1] are both 1/3, it becomes zero:
+ *
+ *      ( (1-3*R[i-1])*l[i] + (1-3*L[i+1]) ) * h[i]
+ *
+ *   4. The equations for zero acceleration border conditions are basically the above
+ *      equation with parts omitted, so the handle size correction also applies.
+ */
+
+
+static void bezier_eq_continuous(float *a, float *b, float *c, float *d, float *dy, float *l, int i)
+{
+	a[i] = l[i]*l[i];
+	b[i] = 2.0f*(l[i] + 1);
+	c[i] = 1.0f/l[i+1];
+	d[i] = dy[i]*l[i]*l[i] + dy[i+1];
+}
+
+static void bezier_eq_noaccel_right(float *a, float *b, float *c, float *d, float *dy, float *l, int i)
+{
+	a[i] = 0.0f;
+	b[i] = 2.0f;
+	c[i] = 1.0f/l[i+1];
+	d[i] = dy[i+1];
+}
+
+static void bezier_eq_noaccel_left(float *a, float *b, float *c, float *d, float *dy, float *l, int i)
+{
+	a[i] = l[i]*l[i];
+	b[i] = 2.0f*l[i];
+	c[i] = 0.0f;
+	d[i] = dy[i]*l[i]*l[i];
+}
+
+#if 0
+static void bezier_eq_constaccel_right(float *a, float *b, float *c, float *d, float *dy, float *l, int i)
+{
+	a[i] = 0.0f;
+	b[i] = 3.0f*l[i+1];
+	c[i] = 3.0f;
+	d[i] = 2.0f*dy[i+1]*l[i+1];
+}
+
+static void bezier_eq_constaccel_left(float *a, float *b, float *c, float *d, float *dy, float *l, int i)
+{
+	a[i] = 3.0f*l[i];
+	b[i] = 3.0f;
+	c[i] = 0.0f;
+	d[i] = 2.0f*dy[i]*l[i];
+}
+#endif
+
+/* auto clamp prevents its own point going the wrong way, and adjacent handles overshooting */
+static void bezier_clamp(float *hmax, float *hmin, int i, float dy, bool no_reverse, bool no_overshoot)
+{
+	if (dy > 0) {
+		if (no_overshoot)
+			hmax[i] = min_ff(hmax[i], dy);
+		if (no_reverse)
+			hmin[i] = 0.0f;
+	}
+	else if (dy < 0) {
+		if (no_reverse)
+			hmax[i] = 0.0f;
+		if (no_overshoot)
+			hmin[i] = max_ff(hmin[i], dy);
+	}
+	else if (no_reverse || no_overshoot) {
+		hmax[i] = hmin[i] = 0.0f;
+	}
+}
+
+/* write changes to a bezier handle */
+static void bezier_output_handle_inner(BezTriple *bezt, bool right, float newval[3], bool endpoint)
+{
+	float tmp[3];
+
+	int idx = right ? 2 : 0;
+	char hr = right ? bezt->h2 : bezt->h1;
+	char hm = right ? bezt->h1 : bezt->h2;
+
+	/* only assign Auto/Vector handles */
+	if (!ELEM(hr, HD_AUTO, HD_AUTO_ANIM, HD_VECT))
+		return;
+
+	copy_v3_v3(bezt->vec[idx], newval);
+
+	/* fix up the Align handle if any */
+	if (ELEM(hm, HD_ALIGN, HD_ALIGN_DOUBLESIDE)) {
+		float hlen = len_v3v3(bezt->vec[1], bezt->vec[2-idx]);
+		float h2len = len_v3v3(bezt->vec[1], bezt->vec[idx]);
+
+		sub_v3_v3v3(tmp, bezt->vec[1], bezt->vec[idx]);
+		madd_v3_v3v3fl(bezt->vec[2-idx], bezt->vec[1], tmp, hlen/h2len);
+	}
+	/* at end points of the curve, mirror handle to the other side */
+	else if (endpoint && ELEM(hm, HD_AUTO, HD_AUTO_ANIM, HD_VECT)) {
+		sub_v3_v3v3(tmp, bezt->vec[1], bezt->vec[idx]);
+		add_v3_v3v3(bezt->vec[2-idx], bezt->vec[1], tmp);
+	}
+}
+
+static void bezier_output_handle(BezTriple *bezt, bool right, float dy, bool endpoint)
+{
+	float tmp[3];
+
+	copy_v3_v3(tmp, bezt->vec[right ? 2 : 0]);
+
+	tmp[1] = bezt->vec[1][1] + dy;
+
+	bezier_output_handle_inner(bezt, right, tmp, endpoint);
+}
+
+static bool bezier_check_solve_end_handle(BezTriple *bezt, char htype, bool end)
+{
+	return (htype == HD_VECT) || (end && ELEM(htype, HD_AUTO, HD_AUTO_ANIM) && bezt->f5 == HD_AUTOTYPE_NORMAL);
+}
+
+static float bezier_calc_handle_adj(float hsize[2], float dx)
+{
+	/* if handles intersect in x direction, they are scaled to fit */
+	float fac = dx/(hsize[0] + dx/3.0f);
+	if (fac < 1.0f)
+		mul_v2_fl(hsize, fac);
+
+	return 1.0f - 3.0f*hsize[0]/dx;
+}
+
+static void bezier_handle_calc_smooth_fcurve(BezTriple *bezt, int total, int start, int count, bool cycle)
+{
+	float *dx, *dy, *l, *a, *b, *c, *d, *h, *hmax, *hmin;
+	float **arrays[] = { &dx, &dy, &l, &a, &b, &c, &d, &h, &hmax, &hmin, NULL };
+
+	int solve_count = count;
+
+	/* verify index ranges */
+
+	if (count < 2)
+		return;
+
+	BLI_assert(start < total-1 && count <= total);
+	BLI_assert(start + count <= total || cycle);
+
+	bool full_cycle = (start == 0 && count == total && cycle);
+
+	BezTriple *bezt_first = &bezt[start];
+	BezTriple *bezt_last = &bezt[(start+count > total) ? start+count-total : start+count-1];
+
+	bool solve_first = bezier_check_solve_end_handle(bezt_first, bezt_first->h2, start==0);
+	bool solve_last = bezier_check_solve_end_handle(bezt_last, bezt_last->h1, start+count==total);
+
+	if (count == 2 && !full_cycle && solve_first == solve_last)
+	    return;
+
+	/* allocate all */
+
+	void *tmp_buffer = allocate_arrays(count, NULL, arrays, NULL, "bezier_calc_smooth_tmp");
+	if (!tmp_buffer)
+		return;
+
+	/* point locations */
+
+	dx[0] = dy[0] = NAN_FLT;
+
+	for (int i = 1, j = start+1; i < count; i++, j++) {
+		dx[i] = bezt[j].vec[1][0] - bezt[j-1].vec[1][0];
+		dy[i] = bezt[j].vec[1][1] - bezt[j-1].vec[1][1];
+
+		/* when cyclic, jump from last point to first */
+		if (cycle && j == total-1)
+			j = 0;
+	}
+
+	/* ratio of x intervals */
+
+	l[0] = l[count-1] = 1.0f;
+
+	for (int i = 1; i < count-1; i++)
+		l[i] = dx[i+1] / dx[i];
+
+	/* compute handle clamp ranges */
+
+	bool clamped_prev = false, clamped_cur = ELEM(HD_AUTO_ANIM, bezt_first->h1, bezt_first->h2);
+
+	for (int i = 0; i < count; i++) {
+		hmax[i] = FLT_MAX;
+		hmin[i] = -FLT_MAX;
+	}
+
+	for (int i = 1, j = start+1; i < count; i++, j++) {
+		clamped_prev = clamped_cur;
+		clamped_cur = ELEM(HD_AUTO_ANIM, bezt[j].h1, bezt[j].h2);
+
+		if (cycle && j == total-1)
+		{
+			j = 0;
+			clamped_cur = clamped_cur || ELEM(HD_AUTO_ANIM, bezt[j].h1, bezt[j].h2);
+		}
+
+		bezier_clamp(hmax, hmin, i-1, dy[i], clamped_prev, clamped_prev);
+		bezier_clamp(hmax, hmin, i, dy[i] * l[i], clamped_cur, clamped_cur);
+	}
+
+	/* full cycle merges first and last points into continuous loop */
+
+	float first_handle_adj = 0.0f, last_handle_adj = 0.0f;
+
+	if (full_cycle)	{
+		/* reduce the number of uknowns by one */
+		int i = solve_count = count-1;
+
+		dx[0] = dx[i];
+		dy[0] = dy[i];
+
+		l[0] = l[i] = dx[1] / dx[0];
+
+		hmin[0] = max_ff(hmin[0], hmin[i]);
+		hmax[0] = min_ff(hmax[0], hmax[i]);
+
+		solve_first = solve_last = true;
+
+		bezier_eq_continuous(a, b, c, d, dy, l, 0);
+	}
+	else {
+		float tmp[2];
+
+		/* boundary condition: fixed handles or zero curvature */
+		if (!solve_first) {
+			sub_v2_v2v2(tmp, bezt_first->vec[2], bezt_first->vec[1]);
+			first_handle_adj = bezier_calc_handle_adj(tmp, dx[1]);
+
+			bezier_lock_unknown(a, b, c, d, 0, tmp[1]);
+		}
+		/*else if (start != 0 && ELEM(bezt_first->h2, HD_AUTO, HD_AUTO_ANIM))
+			bezier_eq_constaccel_right(a, b, c, d, dy, l, 0);*/
+		else
+			bezier_eq_noaccel_right(a, b, c, d, dy, l, 0);
+
+		if (!solve_last) {
+			sub_v2_v2v2(tmp, bezt_last->vec[1], bezt_last->vec[0]);
+			last_handle_adj = bezier_calc_handle_adj(tmp, dx[count-1]);
+
+			bezier_lock_unknown(a, b, c, d, count-1, tmp[1]);
+		}
+		/*else if (start+count != total && ELEM(bezt_last->h1, HD_AUTO, HD_AUTO_ANIM))
+			bezier_eq_constaccel_left(a, b, c, d, dy, l, count-1);*/
+		else
+			bezier_eq_noaccel_left(a, b, c, d, dy, l, count-1);
+	}
+
+	/* main tridiagonal system of equations */
+
+	for (int i = 1; i < count-1; i++) {
+		bezier_eq_continuous(a, b, c, d, dy, l, i);
+	}
+
+	/* apply correction for user-defined handles with nonstandard x positions */
+
+	if (!full_cycle) {
+		if (count > 2 || solve_last)
+			b[1] += l[1]*first_handle_adj;
+
+		if (count > 2 || solve_first)
+			b[count-2] += last_handle_adj;
+	}
+
+	/* solve and output results */
+
+	if (tridiagonal_solve_with_limits(a, b, c, d, h, hmin, hmax, solve_count)) {
+		if (full_cycle)
+			h[count-1] = h[0];
+
+		for (int i = 1, j = start+1; i < count-1; i++, j++) {
+			bool end = (j == total-1);
+
+			bezier_output_handle(&bezt[j], false, - h[i] / l[i], end);
+
+			if (end)
+				j = 0;
+
+			bezier_output_handle(&bezt[j], true, h[i], end);
+		}
+
+		if (solve_first)
+			bezier_output_handle(bezt_first, true, h[0], start == 0);
+
+		if (solve_last)
+			bezier_output_handle(bezt_last, false, - h[count-1] / l[count-1], start+count == total);
+	}
+
+	/* free all */
+
+	MEM_freeN(tmp_buffer);
+}
+
+static void bezier_output_handle_3d(BezTriple *bezt, bool right, float dx, float dy, float dz, bool endpoint)
+{
+	float tmp[3];
+
+	tmp[0] = bezt->vec[1][0] + dx;
+	tmp[1] = bezt->vec[1][1] + dy;
+	tmp[2] = bezt->vec[1][2] + dz;
+
+	bezier_output_handle_inner(bezt, right, tmp, endpoint);
+}
+
+#if 0
+static bool presolve_bezier_continuity(const vec4 *dxyz, const vec4 *hmin, const vec4 *hmax, vec4 *h, int count, bool solve_first, bool solve_last)
+{
+	float *bdx, *bhmin, *bhmax, *l, *a, *b, *c, *d, *bh;
+	float **arrays[] = { &bdx, &bhmin, &bhmax, &l, &a, &b, &c, &d, &bh, NULL };
+
+	void *tmp_buffer = allocate_arrays(count, NULL, arrays, NULL, "presolve_bezier_continuity_tmp");
+	if (!tmp_buffer)
+		return false;
+
+	for (int i = 0; i < count; i++)
+		l[i] = expf(-h[i][3]);
+
+	for (int j = 0; j < 3; j++)
+	{
+		for (int i = 0; i < count; i++) {
+			bdx[i] = dxyz[i][j];
+			bhmin[i] = hmin[i][j];
+			bhmax[i] = hmax[i][j];
+		}
+
+		if (!solve_first)
+			bezier_lock_unknown(a, b, c, d, 0, h[0][j]);
+		else
+			bezier_eq_noaccel_right(a, b, c, d, bdx, l, 0);
+
+		if (!solve_last)
+			bezier_lock_unknown(a, b, c, d, count-1, h[count-1][j]);
+		else
+			bezier_eq_noaccel_left(a, b, c, d, bdx, l, count-1);
+
+		for (int i = 1; i < count-1; i++) {
+			if (hmin[i] != hmax[i])
+				bezier_eq_continuous(a, b, c, d, bdx, l, i);
+			else
+				bezier_lock_unknown(a, b, c, d, i, bhmin[i]);
+		}
+
+		if (!tridiagonal_solve_with_limits(a, b, c, d, bh, bhmin, bhmax, count)) {
+			MEM_freeN(tmp_buffer);
+			return false;
+		}
+
+		for (int i = 0; i < count; i++)
+			h[i][j] = bh[i];
+	}
+
+	MEM_freeN(tmp_buffer);
+	return true;
+}
+
+static float compute_weight_gradient(const vec4 *dxyz, const vec4 *h, vec4 *grad, int count)
+{
+	const float continuity_coeff = 2.46113f;
+	float total_weight = 0.0f, expgi, expgi1;
+
+	if (grad)
+		memset(grad, 0, sizeof(vec4)*count);
+
+	for (int i = 1; i < count; i++) {
+		expgi = expf(h[i][3]);
+
+		for (int j = 0; j < 3; j++) {
+			float jerk_weight = 3*h[i][j]*expgi - 2*dxyz[i][j] + 3*h[i-1][j];
+
+			if (grad) {
+				grad[i-1][j] += 6 * jerk_weight;
+				grad[i][j] += 6 * expgi * jerk_weight;
+				grad[i][3] += 6 * expgi * jerk_weight * h[i][j];
+			}
+
+			total_weight += jerk_weight * jerk_weight;
+		}
+	}
+
+	for (int i = 1; i < count-1; i++) {
+		expgi = expf(h[i][3]);
+		expgi1 = expf(h[i+1][3]);
+
+		for (int j = 0; j < 3; j++) {
+			float weight = h[i-1][j] + 2*expgi*(expgi + 1)*h[i][j] + expgi1*expgi*expgi*h[i+1][j] - expgi*expgi*dxyz[i+1][j] - dxyz[i][j];
+			float cont_weight = continuity_coeff * weight;
+
+			if (grad) {
+				grad[i-1][j] += 2 * cont_weight;
+				grad[i][j] += 4 * cont_weight * expgi * (expgi + 1);
+				grad[i+1][j] += 2 * cont_weight * expgi * expgi * expgi1;
+
+				grad[i][3] += 2 * cont_weight * (2*expgi*(2*expgi + 1)*h[i][j] + 2*expgi1*expgi*expgi*h[i+1][j] - 2*expgi*expgi*dxyz[i+1][j]);
+				grad[i+1][3] += 2 * cont_weight * expgi1*expgi*expgi*h[i+1][j];
+			}
+
+			total_weight += cont_weight * weight;
+		}
+	}
+
+	return total_weight;
+}
+
+static float clamp_gradient(const vec4 *h, const vec4 *hmin, const vec4 *hmax, vec4 *grad, const vec4 *grad2, int count)
+{
+	const float *ph = h[0], *phmin = hmin[0], *phmax = hmax[0], *pgrad2 = grad2[0];
+	float *pgrad = grad[0];
+	float sum = 0.0f;
+
+	for (int i = 0; i < count * 4; i++) {
+		if (ph[i] >= phmax[i])
+			pgrad[i] = max_ff(pgrad[i], 0.0f);
+		else if (ph[i] <= phmin[i])
+			pgrad[i] = min_ff(pgrad[i], 0.0f);
+
+		sum += pgrad[i]*pgrad2[i];
+	}
+
+	return sum;
+}
+
+static void offset_solution(const vec4 *h, const vec4 *hmin, const vec4 *hmax, const vec4 *grad, vec4 *out, float coeff, int count)
+{
+	const float *ph = h[0], *phmin = hmin[0], *phmax = hmax[0], *pgrad = grad[0];
+	float *pout = out[0];
+
+	for (int i = 0; i < count * 4; i++) {
+		pout[i] = min_ff(phmax[i], max_ff(phmin[i], ph[i] + pgrad[i] * coeff));
+	}
+}
+
+static void bezier_handle_calc_smooth_color_curve(BezTriple *bezt, int total, int start, int count, bool UNUSED(cycle))
+{
+	vec4 *dxyz, *h, *hmin, *hmax, *grad, *grad2, *hnext;
+	vec4 **vectors[] = { &dxyz, &h, &hmin, &hmax, &grad, &grad2, &hnext, NULL };
+	float **arrays[] = { NULL };
+	char *mode;
+	char **flags[] = { &mode, NULL };
+	float tmpvec[4];
+
+	/* verify index ranges */
+
+	if (count < 2)
+		return;
+
+	BLI_assert(start < total-1 && count <= total);
+	BLI_assert(start + count <= total);
+
+	BezTriple *bezt_first = &bezt[start];
+	BezTriple *bezt_last = &bezt[start+count-1];
+
+	bool solve_first = bezier_check_solve_end_handle(bezt_first, bezt_first->h2, start==0);
+	bool solve_last = bezier_check_solve_end_handle(bezt_last, bezt_last->h1, start+count==total);
+
+	if (count == 2 && solve_first == solve_last)
+	    return;
+
+	/* allocate all */
+
+	void *tmp_buffer = allocate_arrays(count, vectors, arrays, flags, "bezier_calc_smooth_color_tmp");
+	if (!tmp_buffer)
+		return;
+
+	/* point locations */
+
+	zero_v4(dxyz[0]);
+
+	for (int i = 1, j = start+1; i < count; i++, j++) {
+		sub_v3_v3v3(dxyz[i], bezt[j].vec[1], bezt[j-1].vec[1]);
+		dxyz[i][3] = 0.0f;
+	}
+
+	/* initial handles */
+
+	sub_v3_v3v3(h[0], bezt_first->vec[2], bezt_first->vec[1]);
+	h[0][3] = 0.0f;
+
+	for (int i = 1, j = start+1; i < count-1; i++, j++) {
+		sub_v3_v3v3(h[i], bezt[j].vec[2], bezt[j].vec[1]);
+		sub_v3_v3v3(tmpvec, bezt[j].vec[1], bezt[j].vec[0]);
+		h[i][3] = logf(len_v3(tmpvec) / len_v3(h[i]));
+	}
+
+	sub_v3_v3v3(h[count-1], bezt_last->vec[1], bezt_last->vec[0]);
+	h[count-1][3] = 0.0f;
+
+	/* compute handle clamp ranges */
+
+	for (int i = 0; i < count; i++) {
+		copy_v4_fl(hmin[i], -FLT_MAX);
+		copy_v4_fl(hmax[i], FLT_MAX);
+		hmin[i][0] = 0.0f;
+	}
+
+	hmax[0][0] = dxyz[1][0];
+	hmin[0][3] = hmax[0][3] = 0.0f;
+	hmax[count-1][0] = dxyz[count-1][0];
+	hmin[count-1][3] = hmax[count-1][3] = 0.0f;
+
+	for (int i = 1, j = start+1; i < count-1; i++, j++) {
+		/*bool clamped_cur = ELEM(HD_AUTO_ANIM, bezt[j].h1, bezt[j].h2);
+
+		bezier_clamp(hymax, hymin, i, dy[i] * l[i], clamped_cur, clamped_cur);
+		bezier_clamp(hymax, hymin, i, dy[i+1], clamped_cur, clamped_cur);*/
+
+		hmax[i][0] = min_ff(dxyz[i+1][0], dxyz[i][0] / expf(h[i][3]));
+	}
+
+	/* lock end handles when appropriate */
+
+	if (!solve_first) {
+		copy_v4_v4(hmin[0], h[0]);
+		copy_v4_v4(hmax[0], h[0]);
+	}
+	if (!solve_last) {
+		copy_v4_v4(hmin[count-1], h[count-1]);
+		copy_v4_v4(hmax[count-1], h[count-1]);
+	}
+
+	if (!presolve_bezier_continuity(dxyz, hmin, hmax, h, count, solve_first, solve_last)) {
+		MEM_freeN(tmp_buffer);
+		return;
+	}
+
+	/* gradient descent */
+
+	for (int step = 0; step < 200; step++) {
+		float alpha_l = 0.0f;
+		float weight_l = compute_weight_gradient(dxyz, h, grad, count);
+
+		float gsize = clamp_gradient(h, hmin, hmax, grad, grad, count);
+		if (gsize < 0.01f)
+			break;
+
+		float alpha_r = 0.0001f;
+		offset_solution(h, hmin, hmax, grad, hnext, -alpha_r, count);
+		float weight = compute_weight_gradient(dxyz, hnext, grad2, count);
+
+		while (weight < weight_l && clamp_gradient(hnext, hmin, hmax, grad2, grad, count) > 0) {
+			alpha_r *= 2.0;
+			offset_solution(h, hmin, hmax, grad, hnext, -alpha_r, count);
+			weight = compute_weight_gradient(dxyz, hnext, grad2, count);
+		}
+
+		for (int step2 = 0; step2 < 50 && (alpha_l == 0.0f || weight >= weight_l); step2++) {
+			float alpha = (alpha_l + alpha_r) * 0.5f;
+
+			offset_solution(h, hmin, hmax, grad, hnext, -alpha, count);
+			weight = compute_weight_gradient(dxyz, hnext, grad2, count);
+
+			if (weight < weight_l && clamp_gradient(hnext, hmin, hmax, grad2, grad, count) > 0) {
+				alpha_l = alpha;
+				weight_l = weight;
+			}
+			else {
+				alpha_r = alpha;
+			}
+		}
+
+		if (step == 199)
+			printf("%f..%f: %f %f\n", alpha_l, alpha_r, weight, weight_l);
+
+		SWAP(vec4*, h, hnext);
+	}
+
+	{
+		for (int i = 1, j = start+1; i < count-1; i++, j++) {
+			float beta = expf(h[i][3]);
+			bezier_output_handle_3d(&bezt[j], false, -h[i][0] * beta, -h[i][1] * beta, -h[i][2] * beta, false);
+			bezier_output_handle_3d(&bezt[j], true, h[i][0], h[i][1], h[i][2], false);
+		}
+
+		if (solve_first)
+			bezier_output_handle_3d(bezt_first, true, h[0][0], h[0][1], h[0][2], start == 0);
+
+		if (solve_last)
+			bezier_output_handle_3d(bezt_last, false, -h[count-1][0], -h[count-1][1], -h[count-1][2], start+count == total);
+	}
+
+	/* free all */
+
+	MEM_freeN(tmp_buffer);
+}
+
+#else
+
+static float bezier_arc_length_rec(const float pt0[3], const float pt1[3], const float pt2[3], const float pt3[3], float chord, int depth, float eps)
+{
+	// de-Casteljau splitting
+	float pt01[3], pt12[3], pt23[3];
+	float pt012[3], pt123[3];
+	float pt0123[3];
+
+	interp_v3_v3v3(pt01, pt0, pt1, 0.5f);
+	interp_v3_v3v3(pt12, pt1, pt2, 0.5f);
+	interp_v3_v3v3(pt23, pt2, pt3, 0.5f);
+	interp_v3_v3v3(pt012, pt01, pt12, 0.5f);
+	interp_v3_v3v3(pt123, pt12, pt23, 0.5f);
+	interp_v3_v3v3(pt0123, pt012, pt123, 0.5f);
+
+	float len1 = len_v3v3(pt0, pt0123);
+	float len2 = len_v3v3(pt3, pt0123);
+	float sublen = len1 + len2;
+
+	if (sublen - chord <= eps || depth <= 0)
+		return sublen;
+
+	return bezier_arc_length_rec(pt0, pt01, pt012, pt0123, len1, depth-1, eps * 0.5f) +
+	       bezier_arc_length_rec(pt0123, pt123, pt23, pt3, len2, depth-1, eps * 0.5f);
+}
+
+static float bezier_arc_length(const float pt0[3], const float pt1[3], const float pt2[3], const float pt3[3], int depth, float eps)
+{
+	float chord = len_v3v3(pt0, pt3);
+	return bezier_arc_length_rec(pt0, pt1, pt2, pt3, chord, depth, eps * chord);
+}
+
+static void bezier_handle_calc_smooth_3D(BezTriple *bezt, int total, int start, int count, bool color_curve)
+{
+	float *dx[3], *l, *len, *a[3], *b[3], *c[3], *d[3], *h[3], *hmax[3], *hmin[3];
+	float **arrays[] = {
+	    &dx[0], &dx[1], &dx[2], &l, &len,
+	    &a[0], &b[0], &c[0], &d[0], &a[1], &b[1], &c[1], &d[1], &a[2], &b[2], &c[2], &d[2],
+	    &h[0], &h[1], &h[2], &hmax[0], &hmax[1], &hmax[2], &hmin[0], &hmin[1], &hmin[2],
+	    NULL
+	};
+	float tmp[3];
+
+	int dimension = color_curve ? 2 : 3;
+
+	/* verify index ranges */
+
+	if (count < 2)
+		return;
+
+	BLI_assert(start < total-1 && count <= total);
+	BLI_assert(start + count <= total);
+
+	BezTriple *bezt_first = &bezt[start];
+	BezTriple *bezt_last = &bezt[start+count-1];
+
+	bool solve_first = bezier_check_solve_end_handle(bezt_first, bezt_first->h2, start==0);
+	bool solve_last = bezier_check_solve_end_handle(bezt_last, bezt_last->h1, start+count==total);
+
+	if (count == 2 && solve_first == solve_last)
+	    return;
+
+	/* allocate all */
+
+	void *tmp_buffer = allocate_arrays(count, NULL, arrays, NULL, "bezier_calc_smooth_color_tmp");
+	if (!tmp_buffer)
+		return;
+
+	/* point locations */
+
+	dx[0][0] = dx[1][0] = dx[2][0] = len[0] = NAN_FLT;
+
+	if (color_curve) {
+		memset(dx[2], 0, sizeof(float)*count);
+		memset(h[2], 0, sizeof(float)*count);
+	}
+
+	//printf("\n");
+	for (int i = 1, j = start+1; i < count; i++, j++) {
+		for (int k = 0; k < dimension; k++) {
+			dx[k][i] = bezt[j].vec[1][k] - bezt[j-1].vec[1][k];
+		}
+
+		len[i] = sqrtf(dx[0][i]*dx[0][i] + dx[1][i]*dx[1][i] + dx[2][i]*dx[2][i]);
+		//printf(" %f", len[i]);
+	}
+	//printf("\n");
+
+	/* fixed handles at the end */
+
+	if (!solve_first) {
+		sub_v3_v3v3(tmp, bezt_first->vec[2], bezt_first->vec[1]);
+
+		for (int k = 0; k < dimension; k++) {
+			bezier_lock_unknown(a[k], b[k], c[k], d[k], 0, tmp[k]);
+		}
+	}
+
+	if (!solve_last) {
+		sub_v3_v3v3(tmp, bezt_last->vec[1], bezt_last->vec[0]);
+
+		for (int k = 0; k < dimension; k++) {
+			bezier_lock_unknown(a[k], b[k], c[k], d[k], count-1, tmp[k]);
+		}
+	}
+
+	/* arc length iteration */
+	int step = 10;
+	float max_change;
+
+	do {
+		/* ratio of chords */
+
+		for (int i = 1; i < count-1; i++)
+			l[i] = len[i+1] / len[i];
+
+		l[0] = l[count-1] = 1.0f;
+
+		/* compute handle clamp ranges */
+
+		if (color_curve) {
+			for (int i = 0; i < count; i++) {
+				hmax[0][i] = hmax[1][i] = hmax[2][i] = FLT_MAX;
+				hmin[0][i] = hmin[1][i] = hmin[2][i] = -FLT_MAX;
+				hmin[0][i] = 0;
+			}
+
+			hmax[0][0] = dx[0][1] * 0.9f;
+			hmax[0][count-1] = dx[0][count-1] * 0.9f;
+
+			for (int i = 1, j = start+1; i < count-1; i++, j++) {
+				bool clamped_cur = ELEM(HD_AUTO_ANIM, bezt[j].h1, bezt[j].h2);
+
+				for (int k = 1; k < dimension; k++) {
+					bezier_clamp(hmax[k], hmin[k], i, dx[k][i] * l[i], clamped_cur, clamped_cur);
+					bezier_clamp(hmax[k], hmin[k], i, dx[k][i+1], clamped_cur, clamped_cur);
+				}
+
+				hmax[0][i] = min_ff(dx[0][i+1], dx[0][i] * l[i]) * 0.9f;
+			}
+		}
+
+		/* boundary condition: zero curvature */
+
+		if (solve_first) {
+			for (int k = 0; k < dimension; k++) {
+				bezier_eq_noaccel_right(a[k], b[k], c[k], d[k], dx[k], l, 0);
+			}
+		}
+
+		if (solve_last) {
+			for (int k = 0; k < dimension; k++) {
+				bezier_eq_noaccel_left(a[k], b[k], c[k], d[k], dx[k], l, count-1);
+			}
+		}
+
+		/* main tridiagonal system of equations */
+
+		for (int i = 1; i < count-1; i++) {
+			for (int k = 0; k < dimension; k++) {
+				if (hmin[k][i] != hmax[k][i])
+					bezier_eq_continuous(a[k], b[k], c[k], d[k], dx[k], l, i);
+				else
+					bezier_lock_unknown(a[k], b[k], c[k], d[k], i, hmin[k][i]);
+			}
+		}
+
+		/* solve and output results */
+
+		for (int k = 0; k < dimension; k++) {
+			bool success;
+
+			if (color_curve)
+				success = tridiagonal_solve_with_limits(a[k], b[k], c[k], d[k], h[k], hmin[k], hmax[k], count);
+			else
+				success = BLI_tridiagonal_solve_cyclic(a[k], b[k], c[k], d[k], h[k], count);
+
+			if (!success)
+			{
+				MEM_freeN(tmp_buffer);
+				return;
+			}
+		}
+
+		/* compute new arc lengths */
+		float pt0[3] = {0, 0, 0}, pt1[3] = {0, 0, 0}, pt2[3] = {0, 0, 0}, pt3[3] = {0, 0, 0};
+
+		max_change = 0;
+
+		for (int i = 1; i < count; i++) {
+			for (int k = 0; k < dimension; k++) {
+				pt1[k] = h[k][i-1];
+				pt2[k] = dx[k][i] - h[k][i]/l[i];
+				pt3[k] = dx[k][i];
+			}
+
+			float newlen = bezier_arc_length(pt0, pt1, pt2, pt3, 3, 0.01f);
+
+			max_change = max_ff(max_change, fabsf((newlen - len[i]) / len[i]));
+
+			len[i] = newlen;
+
+			//printf(" %f", len[i]);
+		}
+		//printf("\n%f\n", max_change);
+	}
+	while (--step > 0 && max_change > 0.01f);
+
+	{
+		for (int i = 1, j = start+1; i < count-1; i++, j++) {
+			bezier_output_handle_3d(&bezt[j], false, -h[0][i] / l[i], -h[1][i] / l[i], -h[2][i] / l[i], false);
+			bezier_output_handle_3d(&bezt[j], true, h[0][i], h[1][i], h[2][i], false);
+		}
+
+		if (solve_first)
+			bezier_output_handle_3d(bezt_first, true, h[0][0], h[1][0], h[2][0], start == 0);
+
+		if (solve_last)
+			bezier_output_handle_3d(bezt_last, false, -h[0][count-1] / l[count-1], -h[1][count-1] / l[count-1], -h[2][count-1] / l[count-1], start+count == total);
+	}
+
+	/* free all */
+
+	MEM_freeN(tmp_buffer);
+}
+
+static void bezier_handle_calc_smooth_color_curve(BezTriple *bezt, int total, int start, int count, bool UNUSED(cycle))
+{
+	bezier_handle_calc_smooth_3D(bezt, total, start, count, true);
+}
+#endif
+
+static bool is_auto_point(BezTriple *bezt)
+{
+	return ELEM(bezt->h1, HD_AUTO, HD_AUTO_ANIM) && ELEM(bezt->h2, HD_AUTO, HD_AUTO_ANIM);
+}
+
+static bool is_free_auto_point(BezTriple *bezt)
+{
+	return is_auto_point(bezt) && bezt->f5 == HD_AUTOTYPE_NORMAL;
+}
+
+static void bezier_handle_smooth_curve(void (*smooth_fn)(BezTriple*,int,int,int,bool), bool (*check_fn)(BezTriple*), BezTriple *bezt, int total, bool cycle)
+{
+	/* ignore cyclic extrapolation if end points are locked */
+	cycle = cycle && check_fn(&bezt[0]) && check_fn(&bezt[total-1]);
+
+	/* if cyclic, try to find a sequence break point */
+	int search_base = 0;
+
+	if (cycle) {
+		for (int i = 1; i < total-1; i++) {
+			if (!check_fn(&bezt[i])) {
+				search_base = i;
+				break;
+			}
+		}
+
+		/* all points of the curve are freely changeable auto handles - solve as full cycle */
+		if (search_base == 0) {
+			smooth_fn(bezt, total, 0, total, cycle);
+			return;
+		}
+	}
+
+	/* Find continuous subsequences of free auto handles and smooth them, starting at
+	 * search_base. In cyclic mode these subsequences can span the cycle boundary. */
+	int start = search_base, count = 1;
+
+	for (int i = 1, j = start+1; i < total; i++, j++) {
+		/* in cyclic mode: jump from last to first point when necessary */
+		if (j == total-1 && cycle)
+			j = 0;
+
+		/* non auto handle closes the list (we come here at least for the last handle, see above) */
+		if (!check_fn(&bezt[j])) {
+			smooth_fn(bezt, total, start, count+1, cycle);
+			start = j;
+			count = 1;
+		}
+		else
+			count++;
+	}
+
+	if (count > 1)
+		smooth_fn(bezt, total, start, count, cycle);
+}
+
+void BKE_nurb_handle_smooth_fcurve(BezTriple *bezt, int total, bool cycle)
+{
+	bezier_handle_smooth_curve(bezier_handle_calc_smooth_fcurve, is_free_auto_point, bezt, total, cycle);
+}
+
+void BKE_nurb_handle_smooth_color_curve(BezTriple *bezt, int total)
+{
+	bezier_handle_smooth_curve(bezier_handle_calc_smooth_color_curve, is_auto_point, bezt, total, false);
+}
+
+void BKE_nurb_handle_calc(BezTriple *bezt, BezTriple *prev, BezTriple *next, const bool is_fcurve, const bool smoothing)
+{
+	calchandleNurb_intern(bezt, prev, next, is_fcurve, false, smoothing);
 }
 
 void BKE_nurb_handles_calc(Nurb *nu) /* first, if needed, set handle flags */
@@ -3457,7 +4542,7 @@ void BKE_nurb_handle_calc_simple(Nurb *nu, BezTriple *bezt)
 	if (nu->pntsu > 1) {
 		BezTriple *prev = BKE_nurb_bezt_get_prev(nu, bezt);
 		BezTriple *next = BKE_nurb_bezt_get_next(nu, bezt);
-		BKE_nurb_handle_calc(bezt, prev, next, 0);
+		BKE_nurb_handle_calc(bezt, prev, next, 0, 0);
 	}
 }
 
