@@ -69,7 +69,6 @@ typedef struct CurveMap {
 
 /* cuma->flag */
 #define CUMA_EXTEND_EXTRAPOLATE	1
-#define CUMA_SMOOTH_HANDLES     2
 
 typedef struct CurveMapping {
 	int flag, cur;					/* cur; for buttons, to show active curve */

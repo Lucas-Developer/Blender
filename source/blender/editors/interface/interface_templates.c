@@ -1950,8 +1950,6 @@ enum {
 	UICURVE_FUNC_HANDLE_AUTO_ANIM,
 	UICURVE_FUNC_EXTEND_HOZ,
 	UICURVE_FUNC_EXTEND_EXP,
-	UICURVE_FUNC_SMOOTHING_ENABLE,
-	UICURVE_FUNC_SMOOTHING_DISABLE
 };
 
 static void curvemap_tools_dofunc(bContext *C, void *cumap_v, int event)
@@ -1987,14 +1985,6 @@ static void curvemap_tools_dofunc(bContext *C, void *cumap_v, int event)
 			break;
 		case UICURVE_FUNC_EXTEND_EXP: /* extend extrapolate */
 			cuma->flag |= CUMA_EXTEND_EXTRAPOLATE;
-			curvemapping_changed(cumap, false);
-			break;
-		case UICURVE_FUNC_SMOOTHING_ENABLE:
-			cuma->flag |= CUMA_SMOOTH_HANDLES;
-			curvemapping_changed(cumap, false);
-			break;
-		case UICURVE_FUNC_SMOOTHING_DISABLE:
-			cuma->flag &= ~CUMA_SMOOTH_HANDLES;
 			curvemapping_changed(cumap, false);
 			break;
 	}
@@ -2040,15 +2030,6 @@ static uiBlock *curvemap_tools_func(
 		uiDefIconTextBut(
 		        block, UI_BTYPE_BUT_MENU, 1, ICON_BLANK1, IFACE_("Reset Curve"),
 		        0, yco -= UI_UNIT_Y, menuwidth, UI_UNIT_Y, NULL, 0.0, 0.0, 0, reset_mode, "");
-	}
-
-	{
-		uiDefIconTextBut(
-		        block, UI_BTYPE_BUT_MENU, 1, ICON_BLANK1, IFACE_("Smooth Auto Handles"),
-		        0, yco -= UI_UNIT_Y, menuwidth, UI_UNIT_Y, NULL, 0.0, 0.0, 0, UICURVE_FUNC_SMOOTHING_ENABLE, "");
-		uiDefIconTextBut(
-		        block, UI_BTYPE_BUT_MENU, 1, ICON_BLANK1, IFACE_("Legacy Auto Handles"),
-		        0, yco -= UI_UNIT_Y, menuwidth, UI_UNIT_Y, NULL, 0.0, 0.0, 0, UICURVE_FUNC_SMOOTHING_DISABLE, "");
 	}
 
 	UI_block_direction_set(block, UI_DIR_RIGHT);
