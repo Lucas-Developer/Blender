@@ -37,8 +37,6 @@
 
 struct bMovieHandle;
 struct bNodeTree;
-struct Depsgraph;
-struct EvaluationContext;
 struct Image;
 struct ImageFormatData;
 struct Main;
@@ -248,7 +246,6 @@ void RE_ChangeModeFlag(struct Render *re, int flag, bool clear);
 struct Object *RE_GetCamera(struct Render *re); /* return camera override if set */
 void RE_SetOverrideCamera(struct Render *re, struct Object *camera);
 void RE_SetCamera(struct Render *re, struct Object *camera);
-void RE_SetDepsgraph(struct Render *re, struct Depsgraph *graph);
 void RE_SetEnvmapCamera(struct Render *re, struct Object *cam_ob, float viewscale, float clipsta, float clipend);
 void RE_SetWindow(struct Render *re, const rctf *viewplane, float clipsta, float clipend);
 void RE_SetOrtho(struct Render *re, const rctf *viewplane, float clipsta, float clipend);
@@ -370,7 +367,6 @@ void RE_DataBase_GetView(struct Render *re, float mat[4][4]);
 void RE_GetCameraWindow(struct Render *re, struct Object *camera, int frame, float mat[4][4]);
 void RE_GetCameraModelMatrix(struct Render *re, struct Object *camera, float r_mat[4][4]);
 struct Scene *RE_GetScene(struct Render *re);
-struct EvaluationContext *RE_GetEvalCtx(struct Render *re);
 
 bool RE_force_single_renderlayer(struct Scene *scene);
 bool RE_is_rendering_allowed(struct Scene *scene, struct Object *camera_override, struct ReportList *reports);

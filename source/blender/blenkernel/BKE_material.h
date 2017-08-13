@@ -87,10 +87,6 @@ short BKE_object_material_slot_find_index(struct Object *ob, struct Material *ma
 bool  BKE_object_material_slot_add(struct Object *ob);
 bool  BKE_object_material_slot_remove(struct Object *ob);
 
-struct Image  *BKE_object_material_edit_image_get(struct Object *ob, short mat_nr);
-struct Image **BKE_object_material_edit_image_get_array(struct Object *ob);
-bool           BKE_object_material_edit_image_set(struct Object *ob, short mat_nr, struct Image *image);
-
 void BKE_texpaint_slot_refresh_cache(struct Scene *scene, struct Material *ma);
 void BKE_texpaint_slots_refresh_object(struct Scene *scene, struct Object *ob);
 
@@ -119,11 +115,8 @@ void free_matcopybuf(void);
 void copy_matcopybuf(struct Material *ma);
 void paste_matcopybuf(struct Material *ma);
 
-/* Evaluation. */
-
-struct EvaluationContext;
-
-void BKE_material_eval(struct EvaluationContext *eval_ctx, struct Material *material);
+/* handle backward compatibility for tface/materials called from doversion */	
+int do_version_tface(struct Main *main);
 
 #ifdef __cplusplus
 }

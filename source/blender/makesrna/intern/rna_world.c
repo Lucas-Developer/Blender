@@ -43,10 +43,9 @@
 #include "MEM_guardedalloc.h"
 
 #include "BKE_context.h"
+#include "BKE_depsgraph.h"
 #include "BKE_main.h"
 #include "BKE_texture.h"
-
-#include "DEG_depsgraph.h"
 
 #include "ED_node.h"
 
@@ -89,7 +88,7 @@ static void rna_World_update(Main *UNUSED(bmain), Scene *UNUSED(scene), PointerR
 {
 	World *wo = ptr->id.data;
 
-	DEG_id_tag_update(&wo->id, 0);
+	DAG_id_tag_update(&wo->id, 0);
 	WM_main_add_notifier(NC_WORLD | ND_WORLD, wo);
 }
 
@@ -98,7 +97,7 @@ static void rna_World_draw_update(Main *UNUSED(bmain), Scene *UNUSED(scene), Poi
 {
 	World *wo = ptr->id.data;
 
-	DEG_id_tag_update(&wo->id, 0);
+	DAG_id_tag_update(&wo->id, 0);
 	WM_main_add_notifier(NC_WORLD | ND_WORLD_DRAW, wo);
 }
 #endif
@@ -107,7 +106,7 @@ static void rna_World_draw_update(Main *UNUSED(bmain), Scene *UNUSED(scene), Poi
 {
 	World *wo = ptr->id.data;
 
-	DEG_id_tag_update(&wo->id, 0);
+	DAG_id_tag_update(&wo->id, 0);
 	WM_main_add_notifier(NC_WORLD | ND_WORLD_DRAW, wo);
 	WM_main_add_notifier(NC_OBJECT | ND_DRAW, NULL);
 }
@@ -120,7 +119,6 @@ static void rna_World_use_nodes_update(bContext *C, PointerRNA *ptr)
 		ED_node_shader_default(C, &wrld->id);
 	
 	rna_World_update(CTX_data_main(C), CTX_data_scene(C), ptr);
-	rna_World_draw_update(CTX_data_main(C), CTX_data_scene(C), ptr);
 }
 
 #else

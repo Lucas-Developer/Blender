@@ -49,6 +49,8 @@
 #include "BKE_library_query.h"
 #include "BKE_modifier.h"
 
+#include "depsgraph_private.h"
+
 #include "MOD_boolean_util.h"
 #include "MOD_util.h"
 
@@ -100,6 +102,22 @@ static void foreachObjectLink(
 	BooleanModifierData *bmd = (BooleanModifierData *) md;
 
 	walk(userData, ob, &bmd->object, IDWALK_CB_NOP);
+}
+
+static void updateDepgraph(ModifierData *md, DagForest *forest,
+                           struct Main *UNUSED(bmain),
+                           struct Scene *UNUSED(scene),
+                           Object *UNUSED(ob),
+                           DagNode *obNode)
+{
+	BooleanModifierData *bmd = (BooleanModifierData *) md;
+
+	if (bmd->object) {
+		DagNode *curNode = dag_get_node(forest, bmd->object);
+
+		dag_add_relation(forest, curNode, obNode,
+		                 DAG_RL_DATA_DATA | DAG_RL_OB_DATA, "Boolean Modifier");
+	}
 }
 
 static void updateDepsgraph(ModifierData *md,
@@ -402,8 +420,8 @@ static CustomDataMask requiredDataMask(Object *UNUSED(ob), ModifierData *UNUSED(
 }
 
 static DerivedMesh *applyModifier(
-        ModifierData *md, struct EvaluationContext *UNUSED(eval_ctx),
-        Object *ob, DerivedMesh *derivedData,
+        ModifierData *md, Object *ob,
+        DerivedMesh *derivedData,
         ModifierApplyFlag flag)
 {
 	BooleanModifierData *bmd = (BooleanModifierData *)md;
@@ -442,6 +460,7 @@ ModifierTypeInfo modifierType_Boolean = {
 	/* requiredDataMask */  requiredDataMask,
 	/* freeData */          NULL,
 	/* isDisabled */        isDisabled,
+	/* updateDepgraph */    updateDepgraph,
 	/* updateDepsgraph */   updateDepsgraph,
 	/* dependsOnTime */     NULL,
 	/* dependsOnNormals */  NULL,

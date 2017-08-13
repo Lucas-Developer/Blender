@@ -414,7 +414,7 @@ static void attr_create_uv_map(Scene *scene,
 		int i = 0;
 
 		for(b_mesh.uv_layers.begin(l); l != b_mesh.uv_layers.end(); ++l, ++i) {
-			bool active_render = b_mesh.uv_layers[i].active_render();
+			bool active_render = b_mesh.uv_textures[i].active_render();
 			AttributeStandard std = (active_render)? ATTR_STD_UV: ATTR_STD_NONE;
 			ustring name = ustring(l->name().c_str());
 
@@ -942,7 +942,6 @@ static void sync_mesh_fluid_motion(BL::Object& b_ob, Scene *scene, Mesh *mesh)
 }
 
 Mesh *BlenderSync::sync_mesh(BL::Object& b_ob,
-                             BL::Object& b_ob_instance,
                              bool object_updated,
                              bool hide_tris)
 {
@@ -956,7 +955,7 @@ Mesh *BlenderSync::sync_mesh(BL::Object& b_ob,
 
 	/* test if we can instance or if the object is modified */
 	BL::ID b_ob_data = b_ob.data();
-	BL::ID key = (BKE_object_is_modified(b_ob))? b_ob_instance: b_ob_data;
+	BL::ID key = (BKE_object_is_modified(b_ob))? b_ob: b_ob_data;
 	BL::Material material_override = render_layer.material_override;
 
 	/* find shader indices */
@@ -1053,7 +1052,6 @@ Mesh *BlenderSync::sync_mesh(BL::Object& b_ob,
 		BL::Mesh b_mesh = object_to_mesh(b_data,
 		                                 b_ob,
 		                                 b_scene,
-		                                 b_scene_layer,
 		                                 true,
 		                                 !preview,
 		                                 need_undeformed,
@@ -1185,7 +1183,6 @@ void BlenderSync::sync_mesh_motion(BL::Object& b_ob,
 		b_mesh = object_to_mesh(b_data,
 		                        b_ob,
 		                        b_scene,
-		                        b_scene_layer,
 		                        true,
 		                        !preview,
 		                        false,

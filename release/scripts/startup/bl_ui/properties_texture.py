@@ -459,7 +459,7 @@ def texture_filter_common(tex, layout):
     layout.prop(tex, "filter_type", text="")
     if tex.use_mipmap and tex.filter_type in {'AREA', 'EWA', 'FELINE'}:
         if tex.filter_type == 'FELINE':
-            layout.prop(tex, "filter_lightprobes", text="Light Probes")
+            layout.prop(tex, "filter_probes", text="Probes")
         else:
             layout.prop(tex, "filter_eccentricity", text="Eccentricity")
 
@@ -963,7 +963,7 @@ class TEXTURE_PT_mapping(TextureSlotPanel, Panel):
                 split.label(text="Map:")
                 ob = context.object
                 if ob and ob.type == 'MESH':
-                    split.prop_search(tex, "uv_layer", ob.data, "uv_layers", text="")
+                    split.prop_search(tex, "uv_layer", ob.data, "uv_textures", text="")
                 else:
                     split.prop(tex, "uv_layer", text="")
 
