@@ -60,6 +60,7 @@
 #include "BKE_animsys.h"
 #include "BKE_action.h"
 #include "BKE_context.h"
+#include "BKE_depsgraph.h"
 #include "BKE_fcurve.h"
 #include "BKE_nla.h"
 #include "BKE_global.h"
@@ -68,8 +69,6 @@
 #include "BKE_library.h"
 #include "BKE_report.h"
 #include "BKE_texture.h"
-
-#include "DEG_depsgraph.h"
 
 #include "RNA_access.h"
 
@@ -94,7 +93,6 @@ bool id_type_can_have_animdata(const short id_type)
 		case ID_MA: case ID_TE: case ID_NT:
 		case ID_LA: case ID_CA: case ID_WO:
 		case ID_LS:
-		case ID_LP:
 		case ID_SPK:
 		case ID_SCE:
 		case ID_MC:
@@ -1600,7 +1598,7 @@ static bool animsys_write_rna_setting(PathResolvedRNA *anim_rna, const float val
 		 * notify anyone of updates */
 		if (!(id->tag & LIB_TAG_ANIM_NO_RECALC)) {
 			BKE_id_tag_set_atomic(id, LIB_TAG_ID_RECALC);
-			DEG_id_type_tag(G.main, GS(id->name));
+			DAG_id_type_tag(G.main, GS(id->name));
 		}
 	}
 
@@ -2555,7 +2553,7 @@ static void animsys_evaluate_nla(ListBase *echannels, PointerRNA *ptr, AnimData 
 		ID *id = ptr->id.data;
 		if (!(id->tag & LIB_TAG_ANIM_NO_RECALC)) {
 			id->tag |= LIB_TAG_ID_RECALC;
-			DEG_id_type_tag(G.main, GS(id->name));
+			DAG_id_type_tag(G.main, GS(id->name));
 		}
 	}
 }

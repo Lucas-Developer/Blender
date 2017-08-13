@@ -45,6 +45,7 @@
 
 #include "MEM_guardedalloc.h"
 
+#include "depsgraph_private.h"
 #include "DEG_depsgraph_build.h"
 
 #include "MOD_modifiertypes.h"
@@ -74,6 +75,21 @@ static void foreachObjectLink(
 	MirrorModifierData *mmd = (MirrorModifierData *) md;
 
 	walk(userData, ob, &mmd->mirror_ob, IDWALK_CB_NOP);
+}
+
+static void updateDepgraph(ModifierData *md, DagForest *forest,
+                           struct Main *UNUSED(bmain),
+                           struct Scene *UNUSED(scene),
+                           Object *UNUSED(ob),
+                           DagNode *obNode)
+{
+	MirrorModifierData *mmd = (MirrorModifierData *) md;
+
+	if (mmd->mirror_ob) {
+		DagNode *latNode = dag_get_node(forest, mmd->mirror_ob);
+
+		dag_add_relation(forest, latNode, obNode, DAG_RL_OB_DATA, "Mirror Modifier");
+	}
 }
 
 static void updateDepsgraph(ModifierData *md,
@@ -321,8 +337,8 @@ static DerivedMesh *mirrorModifier__doMirror(MirrorModifierData *mmd,
 	return result;
 }
 
-static DerivedMesh *applyModifier(ModifierData *md, struct EvaluationContext *UNUSED(eval_ctx),
-                                  Object *ob, DerivedMesh *derivedData,
+static DerivedMesh *applyModifier(ModifierData *md, Object *ob,
+                                  DerivedMesh *derivedData,
                                   ModifierApplyFlag UNUSED(flag))
 {
 	DerivedMesh *result;
@@ -361,6 +377,7 @@ ModifierTypeInfo modifierType_Mirror = {
 	/* requiredDataMask */  NULL,
 	/* freeData */          NULL,
 	/* isDisabled */        NULL,
+	/* updateDepgraph */    updateDepgraph,
 	/* updateDepsgraph */   updateDepsgraph,
 	/* dependsOnTime */     NULL,
 	/* dependsOnNormals */	NULL,

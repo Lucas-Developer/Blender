@@ -52,6 +52,7 @@
 
 #include "BKE_animsys.h"
 #include "BKE_curve.h"
+#include "BKE_depsgraph.h"
 #include "BKE_displist.h"
 #include "BKE_font.h"
 #include "BKE_global.h"
@@ -62,8 +63,6 @@
 #include "BKE_main.h"
 #include "BKE_object.h"
 #include "BKE_material.h"
-
-#include "DEG_depsgraph.h"
 
 /* globals */
 
@@ -126,8 +125,6 @@ void BKE_curve_editNurb_free(Curve *cu)
 void BKE_curve_free(Curve *cu)
 {
 	BKE_animdata_free((ID *)cu, false);
-
-	BKE_curve_batch_cache_free(cu);
 
 	BKE_nurbList_free(&cu->nurb);
 	BKE_curve_editfont_free(cu);
@@ -209,7 +206,6 @@ void BKE_curve_copy_data(Main *bmain, Curve *cu_dst, const Curve *cu_src, const 
 	cu_dst->strinfo = MEM_dupallocN(cu_src->strinfo);
 	cu_dst->tb = MEM_dupallocN(cu_src->tb);
 	cu_dst->bb = MEM_dupallocN(cu_src->bb);
-	cu_dst->batch_cache = NULL;
 
 	if (cu_src->key) {
 		BKE_id_copy_ex(bmain, &cu_src->key->id, (ID **)&cu_dst->key, flag, false);
@@ -1622,7 +1618,7 @@ float *BKE_curve_surf_make_orco(Object *ob)
 /* NOTE: This routine is tied to the order of vertex
  * built by displist and as passed to the renderer.
  */
-float *BKE_curve_make_orco(EvaluationContext *eval_ctx, Scene *scene, Object *ob, int *r_numVerts)
+float *BKE_curve_make_orco(Scene *scene, Object *ob, int *r_numVerts)
 {
 	Curve *cu = ob->data;
 	DispList *dl;
@@ -1630,7 +1626,7 @@ float *BKE_curve_make_orco(EvaluationContext *eval_ctx, Scene *scene, Object *ob
 	float *fp, *coord_array;
 	ListBase disp = {NULL, NULL};
 
-	BKE_displist_make_curveTypes_forOrco(eval_ctx, scene, ob, &disp);
+	BKE_displist_make_curveTypes_forOrco(scene, ob, &disp);
 
 	numVerts = 0;
 	for (dl = disp.first; dl; dl = dl->next) {
@@ -1721,7 +1717,7 @@ float *BKE_curve_make_orco(EvaluationContext *eval_ctx, Scene *scene, Object *ob
 
 /* ***************** BEVEL ****************** */
 
-void BKE_curve_bevel_make(EvaluationContext *eval_ctx, Scene *scene, Object *ob, ListBase *disp,
+void BKE_curve_bevel_make(Scene *scene, Object *ob, ListBase *disp,
                           const bool for_render, const bool use_render_resolution)
 {
 	DispList *dl, *dlnew;
@@ -1746,7 +1742,7 @@ void BKE_curve_bevel_make(EvaluationContext *eval_ctx, Scene *scene, Object *ob,
 			facy = cu->bevobj->size[1];
 
 			if (for_render) {
-				BKE_displist_make_curveTypes_forRender(eval_ctx, scene, cu->bevobj, &bevdisp, NULL, false, use_render_resolution);
+				BKE_displist_make_curveTypes_forRender(scene, cu->bevobj, &bevdisp, NULL, false, use_render_resolution);
 				dl = bevdisp.first;
 			}
 			else if (cu->bevobj->curve_cache) {
@@ -4607,7 +4603,7 @@ int BKE_curve_material_index_validate(Curve *cu)
 	}
 
 	if (!is_valid) {
-		DEG_id_tag_update(&cu->id, OB_RECALC_DATA);
+		DAG_id_tag_update(&cu->id, OB_RECALC_DATA);
 		return true;
 	}
 	else {
@@ -4693,22 +4689,5 @@ void BKE_curve_eval_path(EvaluationContext *UNUSED(eval_ctx),
 	 */
 	if (G.debug & G_DEBUG_DEPSGRAPH) {
 		printf("%s on %s\n", __func__, curve->id.name);
-	}
-}
-
-/* Draw Engine */
-void (*BKE_curve_batch_cache_dirty_cb)(Curve *cu, int mode) = NULL;
-void (*BKE_curve_batch_cache_free_cb)(Curve *cu) = NULL;
-
-void BKE_curve_batch_cache_dirty(Curve *cu, int mode)
-{
-	if (cu->batch_cache) {
-		BKE_curve_batch_cache_dirty_cb(cu, mode);
-	}
-}
-void BKE_curve_batch_cache_free(Curve *cu)
-{
-	if (cu->batch_cache) {
-		BKE_curve_batch_cache_free_cb(cu);
 	}
 }
