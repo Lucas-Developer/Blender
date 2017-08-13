@@ -66,6 +66,8 @@
 
 #include "NOD_composite.h"
 
+#include "DEG_depsgraph.h"
+
 EnumPropertyItem rna_enum_node_socket_in_out_items[] = {
 	{ SOCK_IN, "IN", 0, "Input", "" },
 	{ SOCK_OUT, "OUT", 0, "Output", "" },
@@ -179,6 +181,8 @@ static EnumPropertyItem node_sampler_type_items[] = {
 
 #include "ED_node.h"
 #include "ED_render.h"
+
+#include "GPU_material.h"
 
 #include "NOD_common.h"
 #include "NOD_socket.h"
@@ -2289,13 +2293,25 @@ static void rna_NodeSocketStandard_vector_range(PointerRNA *ptr, float *min, flo
 	*softmax = dval->max;
 }
 
+static void rna_NodeSocket_value_update(Main *bmain, Scene *scene, PointerRNA *ptr)
+{
+	bNodeTree *ntree = (bNodeTree *)ptr->id.data;
+	if (ntree->type == NTREE_SHADER) {
+		DEG_id_tag_update_ex(bmain, ptr->id.data, DEG_TAG_SHADING_UPDATE);
+		WM_main_add_notifier(NC_MATERIAL | ND_SHADING, NULL);
+	}
+	else {
+		rna_NodeSocket_update(bmain, scene, ptr);
+	}
+}
+
 /* using a context update function here, to avoid searching the node if possible */
 static void rna_NodeSocketStandard_value_update(struct bContext *C, PointerRNA *ptr)
 {
 	bNode *node;
 	
 	/* default update */
-	rna_NodeSocket_update(CTX_data_main(C), CTX_data_scene(C), ptr);
+	rna_NodeSocket_value_update(CTX_data_main(C), CTX_data_scene(C), ptr);
 	
 	/* try to use node from context, faster */
 	node = CTX_data_pointer_get(C, "node").data;
@@ -3103,6 +3119,7 @@ static int point_density_vertex_color_source_from_shader(NodeShaderTexPointDensi
 
 void rna_ShaderNodePointDensity_density_cache(bNode *self,
                                               Scene *scene,
+                                              SceneLayer *sl,
                                               int settings)
 {
 	NodeShaderTexPointDensity *shader_point_density = self->storage;
@@ -3140,12 +3157,13 @@ void rna_ShaderNodePointDensity_density_cache(bNode *self,
 
 	/* Single-threaded sampling of the voxel domain. */
 	RE_point_density_cache(scene,
-	                       pd,
+	                       sl, pd,
 	                       settings == 1);
 }
 
 void rna_ShaderNodePointDensity_density_calc(bNode *self,
                                              Scene *scene,
+                                             SceneLayer *sl,
                                              int settings,
                                              int *length,
                                              float **values)
@@ -3167,7 +3185,7 @@ void rna_ShaderNodePointDensity_density_calc(bNode *self,
 	}
 
 	/* Single-threaded sampling of the voxel domain. */
-	RE_point_density_sample(scene, pd,
+	RE_point_density_sample(scene, sl, pd,
 	                        resolution,
 	                        settings == 1,
 	                        *values);
@@ -3180,6 +3198,7 @@ void rna_ShaderNodePointDensity_density_calc(bNode *self,
 
 void rna_ShaderNodePointDensity_density_minmax(bNode *self,
                                                Scene *scene,
+                                               SceneLayer *sl,
                                                int settings,
                                                float r_min[3],
                                                float r_max[3])
@@ -3191,7 +3210,7 @@ void rna_ShaderNodePointDensity_density_minmax(bNode *self,
 		zero_v3(r_max);
 		return;
 	}
-	RE_point_density_minmax(scene, pd, settings == 1, r_min, r_max);
+	RE_point_density_minmax(scene, sl, pd, settings == 1, r_min, r_max);
 }
 
 #else
@@ -4175,11 +4194,13 @@ static void def_sh_tex_pointdensity(StructRNA *srna)
 	func = RNA_def_function(srna, "cache_point_density", "rna_ShaderNodePointDensity_density_cache");
 	RNA_def_function_ui_description(func, "Cache point density data for later calculation");
 	RNA_def_pointer(func, "scene", "Scene", "", "");
+	RNA_def_pointer(func, "sl", "SceneLayer", "", "");
 	RNA_def_enum(func, "settings", calc_mode_items, 1, "", "Calculate density for rendering");
 
 	func = RNA_def_function(srna, "calc_point_density", "rna_ShaderNodePointDensity_density_calc");
 	RNA_def_function_ui_description(func, "Calculate point density");
 	RNA_def_pointer(func, "scene", "Scene", "", "");
+	RNA_def_pointer(func, "sl", "SceneLayer", "", "");
 	RNA_def_enum(func, "settings", calc_mode_items, 1, "", "Calculate density for rendering");
 	/* TODO, See how array size of 0 works, this shouldnt be used. */
 	parm = RNA_def_float_array(func, "rgba_values", 1, NULL, 0, 0, "", "RGBA Values", 0, 0);
@@ -4189,6 +4210,7 @@ static void def_sh_tex_pointdensity(StructRNA *srna)
 	func = RNA_def_function(srna, "calc_point_density_minmax", "rna_ShaderNodePointDensity_density_minmax");
 	RNA_def_function_ui_description(func, "Calculate point density");
 	RNA_def_pointer(func, "scene", "Scene", "", "");
+	RNA_def_pointer(func, "sl", "SceneLayer", "", "");
 	RNA_def_enum(func, "settings", calc_mode_items, 1, "", "Calculate density for rendering");
 	parm = RNA_def_property(func, "min", PROP_FLOAT, PROP_COORDS);
 	RNA_def_property_array(parm, 3);
