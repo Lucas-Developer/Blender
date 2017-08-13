@@ -127,10 +127,10 @@ unsigned int vpaint_get_current_col(struct Scene *scene, struct VPaint *vp);
 /* paint_vertex_proj.c */
 struct VertProjHandle;
 struct VertProjHandle *ED_vpaint_proj_handle_create(
-        struct Scene *scene, struct Object *ob,
+        const struct bContext *C, struct Scene *scene, struct Object *ob,
         struct DMCoNo **r_vcosnos);
 void  ED_vpaint_proj_handle_update(
-        struct VertProjHandle *vp_handle,
+        const struct bContext *C, struct VertProjHandle *vp_handle,
         /* runtime vars */
         struct ARegion *ar, const float mval_fl[2]);
 void  ED_vpaint_proj_handle_free(
@@ -209,7 +209,6 @@ bool paint_convert_bb_to_rect(struct rcti *rect,
  * 2D screens-space bounding box into four 3D planes) */
 void paint_calc_redraw_planes(float planes[4][4],
                               const struct ARegion *ar,
-                              struct RegionView3D *rv3d,
                               struct Object *ob,
                               const struct rcti *screen_rect);
 

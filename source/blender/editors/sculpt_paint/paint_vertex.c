@@ -57,7 +57,6 @@
 #include "BKE_action.h"
 #include "BKE_brush.h"
 #include "BKE_context.h"
-#include "BKE_depsgraph.h"
 #include "BKE_deform.h"
 #include "BKE_mesh.h"
 #include "BKE_mesh_mapping.h"
@@ -66,6 +65,8 @@
 #include "BKE_paint.h"
 #include "BKE_report.h"
 #include "BKE_colortools.h"
+
+#include "DEG_depsgraph.h"
 
 #include "WM_api.h"
 #include "WM_types.h"
@@ -262,7 +263,7 @@ static bool make_vertexcol(Object *ob)  /* single ob */
 		BKE_mesh_update_customdata_pointers(me, true);
 	}
 
-	DAG_id_tag_update(&me->id, 0);
+	DEG_id_tag_update(&me->id, 0);
 	
 	return (me->mloopcol != NULL);
 }
@@ -365,7 +366,7 @@ bool ED_vpaint_fill(Object *ob, unsigned int paintcol)
 	/* remove stale me->mcol, will be added later */
 	BKE_mesh_tessface_clear(me);
 
-	DAG_id_tag_update(&me->id, 0);
+	DEG_id_tag_update(&me->id, 0);
 
 	return true;
 }
@@ -450,7 +451,7 @@ bool ED_wpaint_fill(VPaint *wp, Object *ob, float paintweight)
 
 	copy_wpaint_prev(wp, NULL, 0);
 
-	DAG_id_tag_update(&me->id, 0);
+	DEG_id_tag_update(&me->id, 0);
 
 	return true;
 }
@@ -496,7 +497,7 @@ bool ED_vpaint_smooth(Object *ob)
 
 	MEM_freeN(mlooptag);
 
-	DAG_id_tag_update(&me->id, 0);
+	DEG_id_tag_update(&me->id, 0);
 
 	return true;
 }
@@ -541,7 +542,7 @@ bool ED_vpaint_color_transform(
 	/* remove stale me->mcol, will be added later */
 	BKE_mesh_tessface_clear(me);
 
-	DAG_id_tag_update(&me->id, 0);
+	DEG_id_tag_update(&me->id, 0);
 
 	return true;
 }
@@ -813,7 +814,7 @@ static unsigned int vpaint_blend(VPaint *vp, unsigned int col, unsigned int colo
 }
 
 
-static int sample_backbuf_area(ViewContext *vc, int *indexar, int totpoly, int x, int y, float size)
+static int sample_backbuf_area(const bContext *C, ViewContext *vc, int *indexar, int totpoly, int x, int y, float size)
 {
 	struct ImBuf *ibuf;
 	int a, tot = 0, index;
@@ -822,7 +823,7 @@ static int sample_backbuf_area(ViewContext *vc, int *indexar, int totpoly, int x
 	 * brushes with size > 64, why is this here? */
 	/*if (size > 64.0) size = 64.0;*/
 	
-	ibuf = ED_view3d_backbuf_read(vc, x - size, y - size, x + size, y + size);
+	ibuf = ED_view3d_backbuf_read(C, vc, x - size, y - size, x + size, y + size);
 	if (ibuf) {
 		unsigned int *rt = ibuf->rect;
 
@@ -1212,7 +1213,7 @@ static int weight_sample_group_exec(bContext *C, wmOperator *op)
 	BLI_assert(type + 1 >= 0);
 	vc.obact->actdef = type + 1;
 
-	DAG_id_tag_update(&vc.obact->id, OB_RECALC_DATA);
+	DEG_id_tag_update(&vc.obact->id, OB_RECALC_DATA);
 	WM_event_add_notifier(C, NC_OBJECT | ND_DRAW, vc.obact);
 	return OPERATOR_FINISHED;
 }
@@ -1822,12 +1823,14 @@ static int wpaint_mode_toggle_exec(bContext *C, wmOperator *op)
 		ED_vgroup_sync_from_pose(ob);
 	}
 	
+	BKE_mesh_batch_cache_dirty(ob->data, BKE_MESH_BATCH_DIRTY_NOCHECK);
+
 	/* Weightpaint works by overriding colors in mesh,
 	 * so need to make sure we recalc on enter and
 	 * exit (exit needs doing regardless because we
 	 * should redeform).
 	 */
-	DAG_id_tag_update(&me->id, 0);
+	DEG_id_tag_update(&me->id, 0);
 
 	WM_event_add_notifier(C, NC_SCENE | ND_MODE, scene);
 
@@ -2094,7 +2097,7 @@ static bool wpaint_stroke_test_start(bContext *C, wmOperator *op, const float UN
 	}
 
 	/* painting on subsurfs should give correct points too, this returns me->totvert amount */
-	wpd->vp_handle = ED_vpaint_proj_handle_create(scene, ob, &wpd->vertexcosnos);
+	wpd->vp_handle = ED_vpaint_proj_handle_create(C, scene, ob, &wpd->vertexcosnos);
 
 	wpd->indexar = get_indexarray(me);
 	copy_wpaint_prev(wp, me->dvert, me->totvert);
@@ -2240,7 +2243,7 @@ static void wpaint_stroke_update_step(bContext *C, struct PaintStroke *stroke, P
 			/* Ugly x2, we need this so hidden faces don't draw */
 			me->editflag |= ME_EDIT_PAINT_FACE_SEL;
 		}
-		totindex = sample_backbuf_area(vc, indexar, me->totpoly, mval[0], mval[1], brush_size_pressure);
+		totindex = sample_backbuf_area(C, vc, indexar, me->totpoly, mval[0], mval[1], brush_size_pressure);
 		me->editflag = editflag_prev;
 
 		if (use_face_sel && me->totpoly) {
@@ -2261,7 +2264,7 @@ static void wpaint_stroke_update_step(bContext *C, struct PaintStroke *stroke, P
 	}
 
 	/* incase we have modifiers */
-	ED_vpaint_proj_handle_update(wpd->vp_handle, vc->ar, mval);
+	ED_vpaint_proj_handle_update(C, wpd->vp_handle, vc->ar, mval);
 
 	/* make sure each vertex gets treated only once */
 	/* and calculate filter weight */
@@ -2382,7 +2385,9 @@ static void wpaint_stroke_update_step(bContext *C, struct PaintStroke *stroke, P
 	/* also needed for "View Selected" on last stroke */
 	paint_last_stroke_update(scene, vc->ar, mval);
 
-	DAG_id_tag_update(ob->data, 0);
+	BKE_mesh_batch_cache_dirty(ob->data, BKE_MESH_BATCH_DIRTY_NOCHECK);
+
+	DEG_id_tag_update(ob->data, 0);
 	ED_region_tag_redraw(vc->ar);
 }
 
@@ -2439,7 +2444,7 @@ static void wpaint_stroke_done(const bContext *C, struct PaintStroke *stroke)
 		}
 	}
 
-	DAG_id_tag_update(ob->data, 0);
+	DEG_id_tag_update(ob->data, 0);
 
 	WM_event_add_notifier(C, NC_OBJECT | ND_DRAW, ob);
 }
@@ -2587,8 +2592,10 @@ static int vpaint_mode_toggle_exec(bContext *C, wmOperator *op)
 		BKE_paint_init(scene, ePaintVertex, PAINT_CURSOR_VERTEX_PAINT);
 	}
 	
+	BKE_mesh_batch_cache_dirty(ob->data, BKE_MESH_BATCH_DIRTY_NOCHECK);
+
 	/* update modifier stack for mapping requirements */
-	DAG_id_tag_update(&me->id, 0);
+	DEG_id_tag_update(&me->id, 0);
 	
 	WM_event_add_notifier(C, NC_SCENE | ND_MODE, scene);
 	
@@ -2686,7 +2693,7 @@ static bool vpaint_stroke_test_start(bContext *C, struct wmOperator *op, const f
 	paint_stroke_set_mode_data(stroke, vpd);
 	view3d_set_viewcontext(C, &vpd->vc);
 	
-	vpd->vp_handle = ED_vpaint_proj_handle_create(vpd->vc.scene, ob, &vpd->vertexcosnos);
+	vpd->vp_handle = ED_vpaint_proj_handle_create(C, vpd->vc.scene, ob, &vpd->vertexcosnos);
 
 	vpd->indexar = get_indexarray(me);
 	vpd->paintcol = vpaint_get_current_col(scene, vp);
@@ -2820,7 +2827,7 @@ static void vpaint_stroke_update_step(bContext *C, struct PaintStroke *stroke, P
 	mul_m4_m4m4(mat, vc->rv3d->persmat, ob->obmat);
 
 	/* which faces are involved */
-	totindex = sample_backbuf_area(vc, indexar, me->totpoly, mval[0], mval[1], brush_size_pressure);
+	totindex = sample_backbuf_area(C, vc, indexar, me->totpoly, mval[0], mval[1], brush_size_pressure);
 
 	if ((me->editflag & ME_EDIT_PAINT_FACE_SEL) && me->mpoly) {
 		for (index = 0; index < totindex; index++) {
@@ -2836,7 +2843,7 @@ static void vpaint_stroke_update_step(bContext *C, struct PaintStroke *stroke, P
 	swap_m4m4(vc->rv3d->persmat, mat);
 
 	/* incase we have modifiers */
-	ED_vpaint_proj_handle_update(vpd->vp_handle, vc->ar, mval);
+	ED_vpaint_proj_handle_update(C, vpd->vp_handle, vc->ar, mval);
 
 	/* clear modified tag for blur tool */
 	if (vpd->mlooptag)
@@ -2859,12 +2866,14 @@ static void vpaint_stroke_update_step(bContext *C, struct PaintStroke *stroke, P
 	/* also needed for "View Selected" on last stroke */
 	paint_last_stroke_update(scene, vc->ar, mval);
 
+	BKE_mesh_batch_cache_dirty(ob->data, BKE_MESH_BATCH_DIRTY_NOCHECK);
+
 	ED_region_tag_redraw(vc->ar);
 
 	if (vpd->use_fast_update == false) {
 		/* recalculate modifier stack to get new colors, slow,
 		 * avoid this if we can! */
-		DAG_id_tag_update(ob->data, 0);
+		DEG_id_tag_update(ob->data, 0);
 	}
 	else {
 		/* If using new VBO drawing, mark mcol as dirty to force colors gpu buffer refresh! */
@@ -2890,7 +2899,7 @@ static void vpaint_stroke_done(const bContext *C, struct PaintStroke *stroke)
 		MEM_freeN(vpd->mlooptag);
 
 	WM_event_add_notifier(C, NC_OBJECT | ND_DRAW, ob);
-	DAG_id_tag_update(&me->id, 0);
+	DEG_id_tag_update(&me->id, 0);
 
 	MEM_freeN(vpd);
 }
@@ -2971,9 +2980,9 @@ static int weight_from_bones_exec(bContext *C, wmOperator *op)
 	Mesh *me = ob->data;
 	int type = RNA_enum_get(op->ptr, "type");
 
-	create_vgroups_from_armature(op->reports, scene, ob, armob, type, (me->editflag & ME_EDIT_MIRROR_X));
+	create_vgroups_from_armature(op->reports, C, scene, ob, armob, type, (me->editflag & ME_EDIT_MIRROR_X));
 
-	DAG_id_tag_update(&me->id, 0);
+	DEG_id_tag_update(&me->id, 0);
 	WM_event_add_notifier(C, NC_GEOM | ND_DATA, me);
 
 	return OPERATOR_FINISHED;
@@ -3162,7 +3171,7 @@ static int paint_weight_gradient_modal(bContext *C, wmOperator *op, const wmEven
 			free_wpaint_prev(wp);
 		}
 
-		DAG_id_tag_update(&ob->id, OB_RECALC_DATA);
+		DEG_id_tag_update(&ob->id, OB_RECALC_DATA);
 		WM_event_add_notifier(C, NC_OBJECT | ND_DRAW, ob);
 	}
 	else if (ret & OPERATOR_FINISHED) {
@@ -3181,6 +3190,7 @@ static int paint_weight_gradient_exec(bContext *C, wmOperator *op)
 	struct ARegion *ar = CTX_wm_region(C);
 	Scene *scene = CTX_data_scene(C);
 	Object *ob = CTX_data_active_object(C);
+	EvaluationContext eval_ctx;
 	Mesh *me = ob->data;
 	int x_start = RNA_int_get(op->ptr, "xstart");
 	int y_start = RNA_int_get(op->ptr, "ystart");
@@ -3189,7 +3199,11 @@ static int paint_weight_gradient_exec(bContext *C, wmOperator *op)
 	float sco_start[2] = {x_start, y_start};
 	float sco_end[2] = {x_end, y_end};
 	const bool is_interactive = (gesture != NULL);
-	DerivedMesh *dm = mesh_get_derived_final(scene, ob, scene->customdata_mask);
+	DerivedMesh *dm;
+
+	CTX_data_eval_ctx(C, &eval_ctx);
+
+	dm = mesh_get_derived_final(&eval_ctx, scene, ob, scene->customdata_mask);
 
 	DMGradient_userData data = {NULL};
 
@@ -3256,7 +3270,7 @@ static int paint_weight_gradient_exec(bContext *C, wmOperator *op)
 		dm->foreachMappedVert(dm, gradientVertUpdate__mapFunc, &data, DM_FOREACH_NOP);
 	}
 
-	DAG_id_tag_update(&ob->id, OB_RECALC_DATA);
+	DEG_id_tag_update(&ob->id, OB_RECALC_DATA);
 	WM_event_add_notifier(C, NC_OBJECT | ND_DRAW, ob);
 
 	if (is_interactive == false) {

@@ -62,6 +62,7 @@
 #include "DNA_mask_types.h"
 #include "DNA_node_types.h"
 #include "DNA_object_types.h"
+#include "DNA_lightprobe_types.h"
 #include "DNA_scene_types.h"
 #include "DNA_screen_types.h"
 #include "DNA_speaker_types.h"
@@ -70,6 +71,7 @@
 #include "DNA_vfont_types.h"
 #include "DNA_windowmanager_types.h"
 #include "DNA_world_types.h"
+#include "DNA_workspace_types.h"
 
 #include "BLI_blenlib.h"
 #include "BLI_utildefines.h"
@@ -91,7 +93,6 @@
 #include "BKE_cachefile.h"
 #include "BKE_context.h"
 #include "BKE_curve.h"
-#include "BKE_depsgraph.h"
 #include "BKE_font.h"
 #include "BKE_global.h"
 #include "BKE_group.h"
@@ -117,6 +118,7 @@
 #include "BKE_paint.h"
 #include "BKE_particle.h"
 #include "BKE_packedFile.h"
+#include "BKE_lightprobe.h"
 #include "BKE_sound.h"
 #include "BKE_speaker.h"
 #include "BKE_scene.h"
@@ -418,6 +420,9 @@ bool id_make_local(Main *bmain, ID *id, const bool test, const bool lib_local)
 		case ID_SPK:
 			if (!test) BKE_speaker_make_local(bmain, (Speaker *)id, lib_local);
 			return true;
+		case ID_LP:
+			if (!test) BKE_lightprobe_make_local(bmain, (LightProbe *)id, lib_local);
+			return true;
 		case ID_WO:
 			if (!test) BKE_world_make_local(bmain, (World *)id, lib_local);
 			return true;
@@ -469,7 +474,11 @@ bool id_make_local(Main *bmain, ID *id, const bool test, const bool lib_local)
 		case ID_CF:
 			if (!test) BKE_cachefile_make_local(bmain, (CacheFile *)id, lib_local);
 			return true;
+		case ID_WS:
 		case ID_SCR:
+			/* A bit special: can be appended but not linked. Return false
+			 * since supporting make-local doesn't make much sense. */
+			return false;
 		case ID_LI:
 		case ID_KE:
 		case ID_WM:
@@ -577,6 +586,9 @@ bool BKE_id_copy_ex(Main *bmain, const ID *id, ID **r_newid, const int flag, con
 		case ID_SPK:
 			BKE_speaker_copy_data(bmain, (Speaker *)*r_newid, (Speaker *)id, flag);
 			break;
+		case ID_LP:
+			BKE_lightprobe_copy_data(bmain, (LightProbe *)*r_newid, (LightProbe *)id, flag);
+			break;
 		case ID_CA:
 			BKE_camera_copy_data(bmain, (Camera *)*r_newid, (Camera *)id, flag);
 			break;
@@ -637,6 +649,7 @@ bool BKE_id_copy_ex(Main *bmain, const ID *id, ID **r_newid, const int flag, con
 		case ID_LI:
 		case ID_SCR:
 		case ID_WM:
+		case ID_WS:
 		case ID_IP:
 			BLI_assert(0);  /* Should have been rejected at start of function! */
 			break;
@@ -829,6 +842,8 @@ ListBase *which_libbase(Main *mainlib, short type)
 			return &(mainlib->text);
 		case ID_SPK:
 			return &(mainlib->speaker);
+		case ID_LP:
+			return &(mainlib->lightprobe);
 		case ID_SO:
 			return &(mainlib->sound);
 		case ID_GR:
@@ -859,6 +874,8 @@ ListBase *which_libbase(Main *mainlib, short type)
 			return &(mainlib->paintcurves);
 		case ID_CF:
 			return &(mainlib->cachefiles);
+		case ID_WS:
+			return &(mainlib->workspaces);
 	}
 	return NULL;
 }
@@ -944,11 +961,11 @@ void BKE_main_lib_objects_recalc_all(Main *bmain)
 	/* flag for full recalc */
 	for (ob = bmain->object.first; ob; ob = ob->id.next) {
 		if (ID_IS_LINKED_DATABLOCK(ob)) {
-			DAG_id_tag_update(&ob->id, OB_RECALC_OB | OB_RECALC_DATA | OB_RECALC_TIME);
+			DEG_id_tag_update(&ob->id, OB_RECALC_OB | OB_RECALC_DATA | OB_RECALC_TIME);
 		}
 	}
 
-	DAG_id_type_tag(bmain, ID_OB);
+	DEG_id_type_tag(bmain, ID_OB);
 }
 
 /**
@@ -997,6 +1014,7 @@ int set_listbasepointers(Main *main, ListBase **lb)
 	lb[INDEX_ID_BR]  = &(main->brush);
 	lb[INDEX_ID_PA]  = &(main->particle);
 	lb[INDEX_ID_SPK] = &(main->speaker);
+	lb[INDEX_ID_LP]  = &(main->lightprobe);
 
 	lb[INDEX_ID_WO]  = &(main->world);
 	lb[INDEX_ID_MC]  = &(main->movieclip);
@@ -1004,6 +1022,7 @@ int set_listbasepointers(Main *main, ListBase **lb)
 	lb[INDEX_ID_OB]  = &(main->object);
 	lb[INDEX_ID_LS]  = &(main->linestyle); /* referenced by scenes */
 	lb[INDEX_ID_SCE] = &(main->scene);
+	lb[INDEX_ID_WS]  = &(main->workspaces); /* before wm, so it's freed after it! */
 	lb[INDEX_ID_WM]  = &(main->wm);
 	lb[INDEX_ID_MSK] = &(main->mask);
 	
@@ -1056,6 +1075,7 @@ size_t BKE_libblock_get_alloc_info(short type, const char **name)
 		CASE_RETURN(ID_VF,  VFont);
 		CASE_RETURN(ID_TXT, Text);
 		CASE_RETURN(ID_SPK, Speaker);
+		CASE_RETURN(ID_LP,  LightProbe);
 		CASE_RETURN(ID_SO,  bSound);
 		CASE_RETURN(ID_GR,  Group);
 		CASE_RETURN(ID_AR,  bArmature);
@@ -1071,6 +1091,7 @@ size_t BKE_libblock_get_alloc_info(short type, const char **name)
 		CASE_RETURN(ID_PAL, Palette);
 		CASE_RETURN(ID_PC,  PaintCurve);
 		CASE_RETURN(ID_CF,  CacheFile);
+		CASE_RETURN(ID_WS,  WorkSpace);
 	}
 	return 0;
 #undef CASE_RETURN
@@ -1127,7 +1148,7 @@ void *BKE_libblock_alloc(Main *bmain, short type, const char *name, const int fl
 
 			/* TODO to be removed from here! */
 			if ((flag & LIB_ID_CREATE_NO_DEG_TAG) == 0) {
-				DAG_id_type_tag(bmain, type);
+				DEG_id_type_tag(bmain, type);
 			}
 		}
 		else {
@@ -1185,6 +1206,9 @@ void BKE_libblock_init_empty(ID *id)
 			break;
 		case ID_SPK:
 			BKE_speaker_init((Speaker *)id);
+			break;
+		case ID_LP:
+			BKE_lightprobe_init((LightProbe *)id);
 			break;
 		case ID_CA:
 			BKE_camera_init((Camera *)id);
@@ -1310,7 +1334,7 @@ void BKE_libblock_copy_ex(Main *bmain, const ID *id, ID **r_newid, const int fla
 	id_copy_animdata(bmain, new_id, (flag & LIB_ID_COPY_ACTIONS) != 0 && (flag & LIB_ID_CREATE_NO_MAIN) == 0);
 
 	if ((flag & LIB_ID_CREATE_NO_DEG_TAG) == 0 && (flag & LIB_ID_CREATE_NO_MAIN) == 0) {
-		DAG_id_type_tag(bmain, GS(new_id->name));
+		DEG_id_type_tag(bmain, GS(new_id->name));
 	}
 
 	*r_newid = new_id;
