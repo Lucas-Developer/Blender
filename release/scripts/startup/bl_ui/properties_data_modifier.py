@@ -355,7 +355,7 @@ class DATA_PT_modifiers(ModifierButtonsPanel, Panel):
             col.prop(md, "texture_coords_object", text="")
         elif md.texture_coords == 'UV' and ob.type == 'MESH':
             col.label(text="UV Map:")
-            col.prop_search(md, "uv_layer", ob.data, "uv_layers", text="")
+            col.prop_search(md, "uv_layer", ob.data, "uv_textures", text="")
 
         layout.separator()
 
@@ -387,7 +387,7 @@ class DATA_PT_modifiers(ModifierButtonsPanel, Panel):
         sub.active = bool(md.vertex_group)
         sub.prop(md, "protect")
         col.label(text="Particle UV")
-        col.prop_search(md, "particle_uv", ob.data, "uv_layers", text="")
+        col.prop_search(md, "particle_uv", ob.data, "uv_textures", text="")
 
         col = split.column()
         col.prop(md, "use_edge_cut")
@@ -985,10 +985,11 @@ class DATA_PT_modifiers(ModifierButtonsPanel, Panel):
 
         col = split.column()
         col.label(text="UV Map:")
-        col.prop_search(md, "uv_layer", ob.data, "uv_layers", text="")
+        col.prop_search(md, "uv_layer", ob.data, "uv_textures", text="")
 
         split = layout.split()
         col = split.column()
+        col.prop(md, "use_image_override")
         col.prop(md, "projector_count", text="Projectors")
         for proj in md.projectors:
             col.prop(proj, "object", text="")
@@ -1042,7 +1043,7 @@ class DATA_PT_modifiers(ModifierButtonsPanel, Panel):
         if md.texture_coords == 'OBJECT':
             layout.prop(md, "texture_coords_object", text="Object")
         elif md.texture_coords == 'UV' and ob.type == 'MESH':
-            layout.prop_search(md, "uv_layer", ob.data, "uv_layers")
+            layout.prop_search(md, "uv_layer", ob.data, "uv_textures")
 
     def WAVE(self, layout, ob, md):
         split = layout.split()
@@ -1088,7 +1089,7 @@ class DATA_PT_modifiers(ModifierButtonsPanel, Panel):
         col.template_ID(md, "texture", new="texture.new")
         layout.prop(md, "texture_coords")
         if md.texture_coords == 'UV' and ob.type == 'MESH':
-            layout.prop_search(md, "uv_layer", ob.data, "uv_layers")
+            layout.prop_search(md, "uv_layer", ob.data, "uv_textures")
         elif md.texture_coords == 'OBJECT':
             layout.prop(md, "texture_coords_object")
 
@@ -1155,7 +1156,7 @@ class DATA_PT_modifiers(ModifierButtonsPanel, Panel):
                 if md.mask_tex_mapping == 'OBJECT':
                     layout.prop(md, "mask_tex_map_object", text="Object")
                 elif md.mask_tex_mapping == 'UV' and ob.type == 'MESH':
-                    layout.prop_search(md, "mask_tex_uv_layer", ob.data, "uv_layers")
+                    layout.prop_search(md, "mask_tex_uv_layer", ob.data, "uv_textures")
 
     def VERTEX_WEIGHT_EDIT(self, layout, ob, md):
         split = layout.split()
@@ -1324,7 +1325,7 @@ class DATA_PT_modifiers(ModifierButtonsPanel, Panel):
 
         col = split.column()
         col.label(text="UV Map:")
-        col.prop_search(md, "uv_layer", ob.data, "uv_layers", text="")
+        col.prop_search(md, "uv_layer", ob.data, "uv_textures", text="")
 
     def WIREFRAME(self, layout, ob, md):
         has_vgroup = bool(md.vertex_group)

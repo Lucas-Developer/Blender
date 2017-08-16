@@ -177,13 +177,9 @@ typedef struct wmWindow {
 
 	void *ghostwin;             /* don't want to include ghost.h stuff */
 
-	struct Scene *scene;     /* The scene displayed in this window. */
-	struct Scene *new_scene; /* temporary when switching */
-
-	struct WorkSpaceInstanceHook *workspace_hook;
-
-	struct bScreen *screen DNA_DEPRECATED;
-	char screenname[64];         /* MAX_ID_NAME for matching window with active screen after file read */
+	struct bScreen *screen;     /* active screen */
+	struct bScreen *newscreen;  /* temporary when switching */
+	char screenname[64];        /* MAX_ID_NAME for matching window with active screen after file read */
 
 	short posx, posy, sizex, sizey;  /* window coords */
 	short windowstate;  /* borderless, full */

@@ -395,7 +395,8 @@ class NODE_PT_backdrop(Panel):
 
         col = layout.column(align=True)
         col.label(text="Offset:")
-        col.prop(snode, "backdrop_offset", text="")
+        col.prop(snode, "backdrop_x", text="X")
+        col.prop(snode, "backdrop_y", text="Y")
         col.operator("node.backimage_move", text="Move")
 
         layout.operator("node.backimage_fit", text="Fit")

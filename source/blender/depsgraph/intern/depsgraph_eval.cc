@@ -36,6 +36,9 @@
 #include "BLI_ghash.h"
 
 extern "C" {
+#include "DNA_scene_types.h"
+
+#include "BKE_depsgraph.h"
 #include "BKE_scene.h"
 } /* extern "C" */
 
@@ -49,19 +52,53 @@ extern "C" {
 
 #include "intern/depsgraph.h"
 
+#ifdef WITH_LEGACY_DEPSGRAPH
+static bool use_legacy_depsgraph = true;
+#endif
+
 /* Unfinished and unused, and takes quite some pre-processing time. */
 #undef USE_EVAL_PRIORITY
+
+bool DEG_depsgraph_use_legacy(void)
+{
+#ifdef DISABLE_NEW_DEPSGRAPH
+	return true;
+#elif defined(WITH_LEGACY_DEPSGRAPH)
+	return use_legacy_depsgraph;
+#else
+	BLI_assert(!"Should not be used with new depsgraph");
+	return false;
+#endif
+}
+
+void DEG_depsgraph_switch_to_legacy(void)
+{
+#ifdef WITH_LEGACY_DEPSGRAPH
+	use_legacy_depsgraph = true;
+#else
+	BLI_assert(!"Should not be used with new depsgraph");
+#endif
+}
+
+void DEG_depsgraph_switch_to_new(void)
+{
+#ifdef WITH_LEGACY_DEPSGRAPH
+	use_legacy_depsgraph = false;
+#else
+	BLI_assert(!"Should not be used with new depsgraph");
+#endif
+}
 
 /* ****************** */
 /* Evaluation Context */
 
 /* Create new evaluation context. */
-EvaluationContext *DEG_evaluation_context_new(eEvaluationMode mode)
+EvaluationContext *DEG_evaluation_context_new(int mode)
 {
 	EvaluationContext *eval_ctx =
 		(EvaluationContext *)MEM_callocN(sizeof(EvaluationContext),
 		                                 "EvaluationContext");
-	DEG_evaluation_context_init(eval_ctx, mode);
+	eval_ctx->mode = mode;
 	return eval_ctx;
 }
 
@@ -70,20 +107,9 @@ EvaluationContext *DEG_evaluation_context_new(eEvaluationMode mode)
  * Used by the areas which currently overrides the context or doesn't have
  * access to a proper one.
  */
-void DEG_evaluation_context_init(EvaluationContext *eval_ctx,
-                                 eEvaluationMode mode)
+void DEG_evaluation_context_init(EvaluationContext *eval_ctx, int mode)
 {
 	eval_ctx->mode = mode;
-}
-
-void DEG_evaluation_context_init_from_scene(EvaluationContext *eval_ctx,
-                                            Scene *scene,
-                                            SceneLayer *scene_layer,
-                                            eEvaluationMode mode)
-{
-	DEG_evaluation_context_init(eval_ctx, mode);
-	eval_ctx->scene_layer = scene_layer;
-	eval_ctx->ctime = BKE_scene_frame_get(scene);
 }
 
 /* Free evaluation context. */
@@ -101,14 +127,22 @@ void DEG_evaluate_on_refresh(EvaluationContext *eval_ctx,
 	/* Update time on primary timesource. */
 	DEG::TimeSourceDepsNode *tsrc = deg_graph->find_time_source();
 	tsrc->cfra = BKE_scene_frame_get(scene);
-	DEG::deg_evaluate_on_refresh(eval_ctx, deg_graph);
+	unsigned int layers = deg_graph->layers;
+	/* XXX(sergey): This works around missing updates in temp scenes used
+	 * by various scripts, but is weak and needs closer investigation.
+	 */
+	if (layers == 0) {
+		layers = scene->lay;
+	}
+	DEG::deg_evaluate_on_refresh(eval_ctx, deg_graph, layers);
 }
 
 /* Frame-change happened for root scene that graph belongs to. */
 void DEG_evaluate_on_framechange(EvaluationContext *eval_ctx,
                                  Main *bmain,
                                  Depsgraph *graph,
-                                 float ctime)
+                                 float ctime,
+                                 const unsigned int layers)
 {
 	DEG::Depsgraph *deg_graph = reinterpret_cast<DEG::Depsgraph *>(graph);
 	/* Update time on primary timesource. */
@@ -117,7 +151,7 @@ void DEG_evaluate_on_framechange(EvaluationContext *eval_ctx,
 	tsrc->tag_update(deg_graph);
 	DEG::deg_graph_flush_updates(bmain, deg_graph);
 	/* Perform recalculation updates. */
-	DEG::deg_evaluate_on_refresh(eval_ctx, deg_graph);
+	DEG::deg_evaluate_on_refresh(eval_ctx, deg_graph, layers);
 }
 
 bool DEG_needs_eval(Depsgraph *graph)

@@ -10,10 +10,6 @@ uniform float image_texture_width;
 uniform float image_texture_height;
 #endif
 
-in vec2 texCoord_interp;
-out vec4 fragColor;
-#define texture2D texture
-
 #ifdef USE_CURVE_MAPPING
 /* Curve mapping parameters
  *
@@ -147,7 +143,7 @@ vec4 apply_dither(vec2 st, vec4 col)
 
 void main()
 {
-	vec4 col = texture2D(image_texture, texCoord_interp.st);
+	vec4 col = texture2D(image_texture, gl_TexCoord[0].st);
 #ifdef USE_CURVE_MAPPING
 	col = curvemapping_evaluate_premulRGBF(col);
 #endif
@@ -169,8 +165,8 @@ void main()
 	vec4 result = OCIODisplay(col, lut3d_texture);
 
 #ifdef USE_DITHER
-	result = apply_dither(texCoord_interp.st, result);
+	result = apply_dither(gl_TexCoord[0].st, result);
 #endif
 
-	fragColor = result;
+	gl_FragColor = result;
 }
