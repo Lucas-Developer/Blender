@@ -69,7 +69,7 @@
 #include "BKE_sound.h"
 
 #ifdef WITH_AUDASPACE
-#  include <AUD_Sequence.h>
+#  include AUD_SEQUENCE_H
 #endif
 
 /* own include */

@@ -423,7 +423,7 @@ update: .FORCE
 		svn update ../lib/* ; \
 	fi
 	git pull --rebase
-	git submodule update --remote
+	git submodule foreach git pull --rebase origin master
 
 
 # -----------------------------------------------------------------------------
