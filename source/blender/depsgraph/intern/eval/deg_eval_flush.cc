@@ -54,23 +54,6 @@ extern "C" {
 
 namespace DEG {
 
-namespace {
-
-// TODO(sergey): De-duplicate with depsgraph_tag,cc
-void lib_id_recalc_tag(Main *bmain, ID *id)
-{
-	id->tag |= LIB_TAG_ID_RECALC;
-	DEG_id_type_tag(bmain, GS(id->name));
-}
-
-void lib_id_recalc_data_tag(Main *bmain, ID *id)
-{
-	id->tag |= LIB_TAG_ID_RECALC_DATA;
-	DEG_id_type_tag(bmain, GS(id->name));
-}
-
-}  /* namespace */
-
 typedef std::deque<OperationDepsNode *> FlushQueue;
 
 static void flush_init_func(void *data_v, int i)
@@ -120,10 +103,10 @@ void deg_graph_flush_updates(Main *bmain, Depsgraph *graph)
 	 * NOTE: Count how many nodes we need to handle - entry nodes may be
 	 *       component nodes which don't count for this purpose!
 	 */
-	GSET_FOREACH_BEGIN(OperationDepsNode *, node, graph->entry_tags)
+	GSET_FOREACH_BEGIN(OperationDepsNode *, op_node, graph->entry_tags)
 	{
-		queue.push_back(node);
-		node->scheduled = true;
+		queue.push_back(op_node);
+		op_node->scheduled = true;
 	}
 	GSET_FOREACH_END();
 
@@ -138,12 +121,24 @@ void deg_graph_flush_updates(Main *bmain, Depsgraph *graph)
 			ComponentDepsNode *comp_node = node->owner;
 			IDDepsNode *id_node = comp_node->owner;
 
-			ID *id = id_node->id;
+			/* TODO(sergey): Do we need to pass original or evaluated ID here? */
+			ID *id = id_node->id_orig;
 			if (id_node->done == 0) {
 				deg_editors_id_update(bmain, id);
 				lib_id_recalc_tag(bmain, id);
 				/* TODO(sergey): For until we've got proper data nodes in the graph. */
 				lib_id_recalc_data_tag(bmain, id);
+
+#ifdef WITH_COPY_ON_WRITE
+				/* Currently this is needed to get ob->mesh to be replaced with
+				 * original mesh (rather than being evaluated_mesh).
+				 *
+				 * TODO(sergey): This is something we need to avoid.
+				 */
+				ComponentDepsNode *cow_comp =
+				        id_node->find_component(DEG_NODE_TYPE_COPY_ON_WRITE);
+				cow_comp->tag_update(graph);
+#endif
 			}
 
 			if (comp_node->done == 0) {
@@ -155,6 +150,14 @@ void deg_graph_flush_updates(Main *bmain, Depsgraph *graph)
 					}
 				}
 				foreach (OperationDepsNode *op, comp_node->operations) {
+					/* We don't want to flush tags in "upstream" direction for
+					 * certain types of operations.
+					 *
+					 * TODO(sergey): Need a more generic solution for this.
+					 */
+					if (op->opcode == DEG_OPCODE_PARTICLE_SETTINGS_EVAL) {
+						continue;
+					}
 					op->flag |= DEPSOP_FLAG_NEEDS_UPDATE;
 				}
 				if (object != NULL) {
@@ -171,6 +174,8 @@ void deg_graph_flush_updates(Main *bmain, Depsgraph *graph)
 						case DEG_NODE_TYPE_ID_REF:
 						case DEG_NODE_TYPE_PARAMETERS:
 						case DEG_NODE_TYPE_SEQUENCER:
+						case DEG_NODE_TYPE_LAYER_COLLECTIONS:
+						case DEG_NODE_TYPE_COPY_ON_WRITE:
 							/* Ignore, does not translate to object component. */
 							break;
 						case DEG_NODE_TYPE_ANIMATION:
@@ -189,6 +194,9 @@ void deg_graph_flush_updates(Main *bmain, Depsgraph *graph)
 							object->recalc |= OB_RECALC_DATA;
 							break;
 					}
+
+					/* TODO : replace with more granular flags */
+					object->deg_update_flag |= DEG_RUNTIME_DATA_UPDATE;
 				}
 			}
 

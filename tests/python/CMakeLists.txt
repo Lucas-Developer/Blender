@@ -588,3 +588,5 @@ if(WITH_ALEMBIC)
 		--with-legacy-depsgraph=${WITH_LEGACY_DEPSGRAPH}
 	)
 endif()
+
+add_subdirectory(render_layer)
