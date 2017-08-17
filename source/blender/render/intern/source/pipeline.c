@@ -62,9 +62,9 @@
 #include "BKE_animsys.h"  /* <------ should this be here?, needed for sequencer update */
 #include "BKE_camera.h"
 #include "BKE_colortools.h"
+#include "BKE_depsgraph.h"
 #include "BKE_global.h"
 #include "BKE_image.h"
-#include "BKE_layer.h"
 #include "BKE_library.h"
 #include "BKE_library_remap.h"
 #include "BKE_main.h"
@@ -77,8 +77,6 @@
 #include "BKE_sound.h"
 #include "BKE_writeavi.h"  /* <------ should be replaced once with generic movie module */
 #include "BKE_object.h"
-
-#include "DEG_depsgraph.h"
 
 #include "PIL_time.h"
 #include "IMB_colormanagement.h"
@@ -354,15 +352,6 @@ Scene *RE_GetScene(Render *re)
 	return NULL;
 }
 
-EvaluationContext *RE_GetEvalCtx(Render *re)
-{
-	if (re) {
-		return re->eval_ctx;
-	}
-
-	return NULL;
-}
-
 /**
  * Same as #RE_AcquireResultImage but creating the necessary views to store the result
  * fill provided result struct with a copy of thew views of what is done so far the
@@ -561,7 +550,6 @@ void RE_FreeRender(Render *re)
 	/* main dbase can already be invalid now, some database-free code checks it */
 	re->main = NULL;
 	re->scene = NULL;
-	re->depsgraph = NULL;
 	
 	RE_Database_Free(re);	/* view render can still have full database */
 	free_sample_tables(re);
@@ -1710,7 +1698,7 @@ static void do_render_blur_3d(Render *re)
 	
 	/* make sure motion blur changes get reset to current frame */
 	if ((re->r.scemode & (R_NO_FRAME_UPDATE|R_BUTS_PREVIEW|R_VIEWPORT_PREVIEW))==0) {
-		BKE_scene_update_for_newframe(re->eval_ctx, re->main, re->scene);
+		BKE_scene_update_for_newframe(re->eval_ctx, re->main, re->scene, re->lay);
 	}
 	
 	/* weak... the display callback wants an active renderlayer pointer... */
@@ -1946,7 +1934,6 @@ static void render_scene(Render *re, Scene *sce, int cfra)
 
 	/* still unsure entity this... */
 	resc->main = re->main;
-	resc->depsgraph = re->depsgraph;
 	resc->scene = sce;
 	resc->lay = sce->lay;
 	resc->scene_color_manage = BKE_scene_check_color_management_enabled(sce);
@@ -2027,14 +2014,14 @@ bool RE_allow_render_generic_object(Object *ob)
 #define DEPSGRAPH_WORKAROUND_HACK
 
 #ifdef DEPSGRAPH_WORKAROUND_HACK
-static void tag_dependend_objects_for_render(Scene *scene, int UNUSED(renderlay))
+static void tag_dependend_objects_for_render(Scene *scene, int renderlay)
 {
 	Scene *sce_iter;
 	Base *base;
 	for (SETLOOPER(scene, sce_iter, base)) {
 		Object *object = base->object;
 
-		if ((base->flag & BASE_VISIBLED) == 0) {
+		if ((base->lay & renderlay) == 0) {
 			continue;
 		}
 
@@ -2054,22 +2041,22 @@ static void tag_dependend_objects_for_render(Scene *scene, int UNUSED(renderlay)
 					if (md->type == eModifierType_Boolean) {
 						BooleanModifierData *bmd = (BooleanModifierData *)md;
 						if (bmd->object && bmd->object->type == OB_MESH) {
-							DEG_id_tag_update(&bmd->object->id, OB_RECALC_DATA);
+							DAG_id_tag_update(&bmd->object->id, OB_RECALC_DATA);
 						}
 					}
 					else if (md->type == eModifierType_Array) {
 						ArrayModifierData *amd = (ArrayModifierData *)md;
 						if (amd->start_cap && amd->start_cap->type == OB_MESH) {
-							DEG_id_tag_update(&amd->start_cap->id, OB_RECALC_DATA);
+							DAG_id_tag_update(&amd->start_cap->id, OB_RECALC_DATA);
 						}
 						if (amd->end_cap && amd->end_cap->type == OB_MESH) {
-							DEG_id_tag_update(&amd->end_cap->id, OB_RECALC_DATA);
+							DAG_id_tag_update(&amd->end_cap->id, OB_RECALC_DATA);
 						}
 					}
 					else if (md->type == eModifierType_Shrinkwrap) {
 						ShrinkwrapModifierData *smd = (ShrinkwrapModifierData *)md;
 						if (smd->target  && smd->target->type == OB_MESH) {
-							DEG_id_tag_update(&smd->target->id, OB_RECALC_DATA);
+							DAG_id_tag_update(&smd->target->id, OB_RECALC_DATA);
 						}
 					}
 				}
@@ -2603,7 +2590,7 @@ static void do_render_composite_fields_blur_3d(Render *re)
 				R.i.cfra = re->i.cfra;
 				
 				if (update_newframe)
-					BKE_scene_update_for_newframe(re->eval_ctx, re->main, re->scene);
+					BKE_scene_update_for_newframe(re->eval_ctx, re->main, re->scene, re->lay);
 				
 				if (re->r.scemode & R_FULL_SAMPLE)
 					do_merge_fullsample(re, ntree);
@@ -3655,8 +3642,19 @@ void RE_BlenderAnim(Render *re, Main *bmain, Scene *scene, Object *camera_overri
 			render_initialize_from_main(re, &rd, bmain, scene, NULL, camera_override, lay_override, 1, 0);
 
 			if (nfra != scene->r.cfra) {
-				/* Skip this frame, but update for physics and particles system. */
-				BKE_scene_update_for_newframe(re->eval_ctx, bmain, scene);
+				/*
+				 * Skip this frame, but update for physics and particles system.
+				 * From convertblender.c:
+				 * in localview, lamps are using normal layers, objects only local bits.
+				 */
+				unsigned int updatelay;
+
+				if (re->lay & 0xFF000000)
+					updatelay = re->lay & 0xFF000000;
+				else
+					updatelay = re->lay;
+
+				BKE_scene_update_for_newframe(re->eval_ctx, bmain, scene, updatelay);
 				continue;
 			}
 			else
@@ -3805,7 +3803,6 @@ void RE_BlenderAnim(Render *re, Main *bmain, Scene *scene, Object *camera_overri
 void RE_PreviewRender(Render *re, Main *bmain, Scene *sce)
 {
 	Object *camera;
-	SceneLayer *scene_layer = BKE_scene_layer_from_scene_get(sce);
 	int winx, winy;
 
 	winx = (sce->r.size * sce->r.xsch) / 100;
@@ -3819,8 +3816,6 @@ void RE_PreviewRender(Render *re, Main *bmain, Scene *sce)
 	re->scene = sce;
 	re->scene_color_manage = BKE_scene_check_color_management_enabled(sce);
 	re->lay = sce->lay;
-	re->depsgraph = BKE_scene_get_depsgraph(sce, scene_layer);
-	re->eval_ctx->scene_layer = scene_layer;
 
 	camera = RE_GetCamera(re);
 	RE_SetCamera(re, camera);

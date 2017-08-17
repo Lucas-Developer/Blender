@@ -244,8 +244,6 @@ endif()
 option(WITH_PLAYER        "Build Player" OFF)
 option(WITH_OPENCOLORIO   "Enable OpenColorIO color management" ${_init_OPENCOLORIO})
 
-option(WITH_CLAY_ENGINE    "Enable Clay engine" ON)
-
 # Compositor
 option(WITH_COMPOSITOR         "Enable the tile based nodal compositor" ON)
 
@@ -392,14 +390,10 @@ if(UNIX AND NOT APPLE)
 endif()
 
 option(WITH_PYTHON_INSTALL       "Copy system python into the blender install folder" ON)
-if(WITH_PYTHON_INSTALL OR (WITH_AUDASPACE AND NOT WITH_SYSTEM_AUDASPACE))
-	set(PYTHON_NUMPY_PATH            "" CACHE PATH "Path to python site-packages or dist-packages containing 'numpy' module")
-	mark_as_advanced(PYTHON_NUMPY_PATH)
-	set(PYTHON_NUMPY_INCLUDE_DIRS ${PYTHON_NUMPY_PATH}/numpy/core/include CACHE PATH "Path to the include directory of the numpy module")
-	mark_as_advanced(PYTHON_NUMPY_INCLUDE_DIRS)
-endif()
 if(WITH_PYTHON_INSTALL)
 	option(WITH_PYTHON_INSTALL_NUMPY "Copy system numpy into the blender install folder"  ON)
+	set(PYTHON_NUMPY_PATH            "" CACHE PATH "Path to python site-packages or dist-packages containing 'numpy' module")
+	mark_as_advanced(PYTHON_NUMPY_PATH)
 
 	if(UNIX AND NOT APPLE)
 		option(WITH_PYTHON_INSTALL_REQUESTS "Copy system requests into the blender install folder" ON)
@@ -470,15 +464,27 @@ endif()
 
 # OpenGL
 
+option(WITH_GLEW_MX             "Support multiple GLEW contexts (experimental)"                                                                     OFF )
 option(WITH_GLEW_ES             "Switches to experimental copy of GLEW that has support for OpenGL ES. (temporary option for development purposes)" OFF)
 option(WITH_GL_EGL              "Use the EGL OpenGL system library instead of the platform specific OpenGL system library (CGL, glX, or WGL)"       OFF)
+option(WITH_GL_PROFILE_COMPAT   "Support using the OpenGL 'compatibility' profile. (deprecated)"                                                    ON )
+option(WITH_GL_PROFILE_CORE     "Support using the OpenGL 3.2+ 'core' profile."                                                                     OFF)
 option(WITH_GL_PROFILE_ES20     "Support using OpenGL ES 2.0. (thru either EGL or the AGL/WGL/XGL 'es20' profile)"                                  OFF)
 
 mark_as_advanced(
+	WITH_GLEW_MX
 	WITH_GLEW_ES
 	WITH_GL_EGL
+	WITH_GL_PROFILE_COMPAT
+	WITH_GL_PROFILE_CORE
 	WITH_GL_PROFILE_ES20
 )
+
+if(WITH_GL_PROFILE_COMPAT)
+	set(WITH_GLU ON)
+else()
+	set(WITH_GLU OFF)
+endif()
 
 if(WIN32)
 	option(WITH_GL_ANGLE "Link with the ANGLE library, an OpenGL ES 2.0 implementation based on Direct3D, instead of the system OpenGL library." OFF)
@@ -500,10 +506,11 @@ endif()
 # We default options to whatever default standard in the current compiler.
 if(CMAKE_COMPILER_IS_GNUCC AND (NOT "${CMAKE_C_COMPILER_VERSION}" VERSION_LESS "6.0") AND (NOT WITH_CXX11))
 	set(_c11_init ON)
+	set(_cxx11_init ON)
 else()
 	set(_c11_init OFF)
+	set(_cxx11_init OFF)
 endif()
-set(_cxx11_init ON)
 
 option(WITH_C11 "Build with C11 standard enabled, for development use only!" ${_c11_init})
 mark_as_advanced(WITH_C11)
@@ -517,8 +524,8 @@ if(CMAKE_COMPILER_IS_GNUCC)
 endif()
 
 # Dependency graph
-option(WITH_DEPSGRAPH_COPY_ON_WRITE "Build Blender with copy-on-write support for dependency graph" OFF)
-mark_as_advanced(WITH_DEPSGRAPH_COPY_ON_WRITE)
+option(WITH_LEGACY_DEPSGRAPH "Build Blender with legacy dependency graph" ON)
+mark_as_advanced(WITH_LEGACY_DEPSGRAPH)
 
 if(WIN32)
 	# Use hardcoded paths or find_package to find externals
@@ -704,9 +711,30 @@ TEST_SHARED_PTR_SUPPORT()
 TEST_UNORDERED_MAP_SUPPORT()
 
 if(WITH_AUDASPACE)
-	if(NOT WITH_SYSTEM_AUDASPACE)
-		set(AUDASPACE_C_INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/extern/audaspace/bindings/C" "${CMAKE_BINARY_DIR}/extern/audaspace")
-		set(AUDASPACE_PY_INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/extern/audaspace/bindings")
+	if(WITH_SYSTEM_AUDASPACE)
+		set(AUDASPACE_DEFINITIONS
+			-DWITH_AUDASPACE
+			-DWITH_SYSTEM_AUDASPACE
+			"-DAUD_DEVICE_H=<AUD_Device.h>"
+			"-DAUD_SPECIAL_H=<AUD_Special.h>"
+			"-DAUD_SOUND_H=<AUD_Sound.h>"
+			"-DAUD_HANDLE_H=<AUD_Handle.h>"
+			"-DAUD_SEQUENCE_H=<AUD_Sequence.h>"
+			"-DAUD_TYPES_H=<AUD_Types.h>"
+			"-DAUD_PYTHON_H=<python/PyAPI.h>"
+		)
+	else()
+		set(AUDASPACE_C_INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/intern/audaspace/intern")
+		set(AUDASPACE_PY_INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/intern/audaspace/intern")
+		set(AUDASPACE_DEFINITIONS
+			-DWITH_AUDASPACE
+			"-DAUD_DEVICE_H=<AUD_C-API.h>"
+			"-DAUD_SPECIAL_H=<AUD_C-API.h>"
+			"-DAUD_SOUND_H=<AUD_C-API.h>"
+			"-DAUD_HANDLE_H=<AUD_C-API.h>"
+			"-DAUD_SEQUENCE_H=<AUD_C-API.h>"
+			"-DAUD_TYPES_H=<AUD_Space.h>"
+		)
 	endif()
 endif()
 
@@ -935,11 +963,19 @@ endif()
 find_package(OpenGL)
 blender_include_dirs_sys("${OPENGL_INCLUDE_DIR}")
 
+if(WITH_GLU)
+	list(APPEND BLENDER_GL_LIBRARIES "${OPENGL_glu_LIBRARY}")
+	list(APPEND GL_DEFINITIONS -DWITH_GLU)
+endif()
+
 if(WITH_SYSTEM_GLES)
 	find_package_wrapper(OpenGLES)
 endif()
 
-if(WITH_GL_PROFILE_ES20)
+if(WITH_GL_PROFILE_COMPAT OR WITH_GL_PROFILE_CORE)
+	list(APPEND BLENDER_GL_LIBRARIES "${OPENGL_gl_LIBRARY}")
+
+elseif(WITH_GL_PROFILE_ES20)
 	if(WITH_SYSTEM_GLES)
 		if(NOT OPENGLES_LIBRARY)
 			message(FATAL_ERROR
@@ -999,9 +1035,6 @@ if(WITH_GL_PROFILE_ES20)
 
 	endif()
 
-else()
-	list(APPEND BLENDER_GL_LIBRARIES "${OPENGL_gl_LIBRARY}")
-
 endif()
 
 if(WITH_GL_EGL)
@@ -1049,10 +1082,16 @@ if(WITH_GL_EGL)
 
 endif()
 
+if(WITH_GL_PROFILE_COMPAT)
+	list(APPEND GL_DEFINITIONS -DWITH_GL_PROFILE_COMPAT)
+endif()
+
+if(WITH_GL_PROFILE_CORE)
+	list(APPEND GL_DEFINITIONS -DWITH_GL_PROFILE_CORE)
+endif()
+
 if(WITH_GL_PROFILE_ES20)
 	list(APPEND GL_DEFINITIONS -DWITH_GL_PROFILE_ES20)
-else()
-	list(APPEND GL_DEFINITIONS -DWITH_GL_PROFILE_CORE)
 endif()
 
 if(WITH_GL_EGL)
@@ -1089,6 +1128,10 @@ endif()
 #-----------------------------------------------------------------------------
 # Configure GLEW
 
+if(WITH_GLEW_MX)
+	list(APPEND GL_DEFINITIONS -DWITH_GLEW_MX)
+endif()
+
 if(WITH_SYSTEM_GLEW)
 	find_package(GLEW)
 
@@ -1098,7 +1141,11 @@ if(WITH_SYSTEM_GLEW)
 		message(FATAL_ERROR "GLEW is required to build Blender. Install it or disable WITH_SYSTEM_GLEW.")
 	endif()
 
-	set(BLENDER_GLEW_LIBRARIES ${GLEW_LIBRARY})
+	if(WITH_GLEW_MX)
+		set(BLENDER_GLEW_LIBRARIES ${GLEW_MX_LIBRARY})
+	else()
+		set(BLENDER_GLEW_LIBRARIES ${GLEW_LIBRARY})
+	endif()
 else()
 	if(WITH_GLEW_ES)
 		set(GLEW_INCLUDE_PATH "${CMAKE_SOURCE_DIR}/extern/glew-es/include")
@@ -1106,11 +1153,12 @@ else()
 		list(APPEND GL_DEFINITIONS -DGLEW_STATIC -DWITH_GLEW_ES)
 
 		# These definitions remove APIs from glew.h, making GLEW smaller, and catching unguarded API usage
-		if(WITH_GL_PROFILE_ES20)
-			list(APPEND GL_DEFINITIONS -DGLEW_ES_ONLY)
-		else()
+		if(NOT WITH_GL_PROFILE_ES20)
 			# No ES functions are needed
 			list(APPEND GL_DEFINITIONS -DGLEW_NO_ES)
+		elseif(NOT (WITH_GL_PROFILE_CORE OR WITH_GL_PROFILE_COMPAT))
+			# ES is enabled, but the other functions are all disabled
+			list(APPEND GL_DEFINITIONS -DGLEW_ES_ONLY)
 		endif()
 
 		if(WITH_GL_PROFILE_ES20)
@@ -1147,7 +1195,9 @@ else()
 
 endif()
 
-list(APPEND GL_DEFINITIONS -DGLEW_NO_GLU)
+if(NOT WITH_GLU)
+	list(APPEND GL_DEFINITIONS -DGLEW_NO_GLU)
+endif()
 
 #-----------------------------------------------------------------------------
 # Configure Bullet
@@ -1454,7 +1504,7 @@ if(WITH_PYTHON)
 
 	if(WIN32 OR APPLE)
 		# pass, we have this in an archive to extract
-	elseif((WITH_PYTHON_INSTALL AND WITH_PYTHON_INSTALL_NUMPY) OR (WITH_AUDASPACE AND NOT WITH_SYSTEM_AUDASPACE))
+	elseif(WITH_PYTHON_INSTALL AND WITH_PYTHON_INSTALL_NUMPY)
 		find_python_package(numpy)
 	endif()
 
@@ -1692,7 +1742,10 @@ if(FIRST_RUN)
 
 	info_cfg_text("OpenGL:")
 	info_cfg_option(WITH_GLEW_ES)
+	info_cfg_option(WITH_GLU)
 	info_cfg_option(WITH_GL_EGL)
+	info_cfg_option(WITH_GL_PROFILE_COMPAT)
+	info_cfg_option(WITH_GL_PROFILE_CORE)
 	info_cfg_option(WITH_GL_PROFILE_ES20)
 	if(WIN32)
 		info_cfg_option(WITH_GL_ANGLE)
