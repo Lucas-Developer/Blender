@@ -35,7 +35,7 @@
 #include "DNA_userdef_types.h"
 
 #ifdef WITH_AUDASPACE
-#  include <AUD_Device.h>
+#  include AUD_DEVICE_H
 #endif
 
 #include "BLI_utildefines.h"
