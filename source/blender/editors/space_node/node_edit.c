@@ -41,6 +41,7 @@
 #include "BLI_blenlib.h"
 
 #include "BKE_context.h"
+#include "BKE_depsgraph.h"
 #include "BKE_global.h"
 #include "BKE_image.h"
 #include "BKE_library.h"
@@ -48,8 +49,6 @@
 #include "BKE_node.h"
 #include "BKE_report.h"
 #include "BKE_scene.h"
-
-#include "DEG_depsgraph.h"
 
 #include "RE_engine.h"
 #include "RE_pipeline.h"
@@ -124,7 +123,7 @@ static int compo_get_recalc_flags(const bContext *C)
 	int recalc_flags = 0;
 
 	for (win = wm->windows.first; win; win = win->next) {
-		const bScreen *sc = WM_window_get_active_screen(win);
+		bScreen *sc = win->screen;
 		ScrArea *sa;
 
 		for (sa = sc->areabase.first; sa; sa = sa->next) {
@@ -329,11 +328,11 @@ void snode_dag_update(bContext *C, SpaceNode *snode)
 	if (snode->edittree != snode->nodetree) {
 		FOREACH_NODETREE(bmain, tntree, id) {
 			if (ntreeHasTree(tntree, snode->edittree))
-				DEG_id_tag_update(id, 0);
+				DAG_id_tag_update(id, 0);
 		} FOREACH_NODETREE_END
 	}
 
-	DEG_id_tag_update(snode->id, 0);
+	DAG_id_tag_update(snode->id, 0);
 }
 
 void snode_notify(bContext *C, SpaceNode *snode)
@@ -398,11 +397,7 @@ void ED_node_shader_default(const bContext *C, ID *id)
 			Material *ma = (Material *)id;
 			ma->nodetree = ntree;
 
-			if (BKE_scene_uses_blender_eevee(scene)) {
-				output_type = SH_NODE_OUTPUT_EEVEE_MATERIAL;
-				shader_type = SH_NODE_EEVEE_METALLIC;
-			}
-			else if (BKE_scene_use_new_shading_nodes(scene)) {
+			if (BKE_scene_use_new_shading_nodes(scene)) {
 				output_type = SH_NODE_OUTPUT_MATERIAL;
 				shader_type = SH_NODE_BSDF_DIFFUSE;
 			}
