@@ -253,6 +253,7 @@ typedef struct bNodeType {
 /* nodetype->compatibility */
 #define NODE_OLD_SHADING	1
 #define NODE_NEW_SHADING	2
+#define NODE_NEWER_SHADING	3
 
 /* node resize directions */
 #define NODE_RESIZE_TOP		1
@@ -689,6 +690,13 @@ bool BKE_node_tree_iter_step(struct NodeTreeIterStore *ntreeiter,
 }
 /** \} */
 
+
+/* -------------------------------------------------------------------- */
+/** \name Node Tree
+ */
+
+void BKE_nodetree_remove_layer_n(struct bNodeTree *ntree, struct Scene *scene, const int layer_index);
+
 /* -------------------------------------------------------------------- */
 /** \name Shader Nodes
  */
@@ -788,6 +796,9 @@ struct ShadeResult;
 #define SH_NODE_UVALONGSTROKE			191
 #define SH_NODE_TEX_POINTDENSITY		192
 #define SH_NODE_BSDF_PRINCIPLED         193
+#define SH_NODE_EEVEE_METALLIC			194
+#define SH_NODE_EEVEE_SPECULAR			195
+#define SH_NODE_OUTPUT_EEVEE_MATERIAL	196
 
 /* custom defines options for Material node */
 #define SH_NODE_MAT_DIFF   1
