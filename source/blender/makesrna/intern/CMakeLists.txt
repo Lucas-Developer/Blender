@@ -72,6 +72,7 @@ set(DEFSRC
 	rna_palette.c
 	rna_particle.c
 	rna_pose.c
+	rna_lightprobe.c
 	rna_property.c
 	rna_render.c
 	rna_rigidbody.c
@@ -94,6 +95,8 @@ set(DEFSRC
 	rna_userdef.c
 	rna_vfont.c
 	rna_wm.c
+	rna_wm_manipulator.c
+	rna_workspace.c
 	rna_world.c
 )
 
@@ -124,6 +127,7 @@ set(APISRC
 	rna_ui_api.c
 	rna_vfont_api.c
 	rna_wm_api.c
+	rna_wm_manipulator_api.c
 )
 
 string(REGEX REPLACE "rna_([a-zA-Z0-9_-]*).c" "${CMAKE_CURRENT_BINARY_DIR}/rna_\\1_gen.c" GENSRC "${DEFSRC}")
@@ -192,6 +196,10 @@ if(WITH_GAMEENGINE)
 	add_definitions(-DWITH_GAMEENGINE)
 endif()
 
+if(WITH_CLAY_ENGINE)
+	add_definitions(-DWITH_CLAY_ENGINE)
+endif()
+
 if(WITH_IMAGE_OPENEXR)
 	add_definitions(-DWITH_OPENEXR)
 endif()
@@ -225,7 +233,7 @@ if(WITH_IMAGE_FRAMESERVER)
 endif()
 
 if(WITH_AUDASPACE)
-	add_definitions(${AUDASPACE_DEFINITIONS})
+	add_definitions(-DWITH_AUDASPACE)
 
 	list(APPEND INC_SYS
 		${AUDASPACE_C_INCLUDE_DIRS}
@@ -341,6 +349,7 @@ blender_include_dirs(
 	../../bmesh
 	../../blentranslation
 	../../depsgraph
+	../../draw
 	../../gpu
 	../../imbuf
 	../../ikplugin

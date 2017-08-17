@@ -2023,7 +2023,7 @@ bNodeTree *ntreeLocalize(bNodeTree *ntree)
 
 		for (node = ntree->nodes.first; node; node = node->next) {
 			/* store new_node pointer to original */
-			node->new_node->new_node = node;
+			node->new_node->original = node;
 		}
 
 		if (ntree->typeinfo->localize)
@@ -3594,9 +3594,12 @@ static void registerShaderNodes(void)
 	register_node_type_sh_add_shader();
 	register_node_type_sh_uvmap();
 	register_node_type_sh_uvalongstroke();
+	register_node_type_sh_eevee_metallic();
+	register_node_type_sh_eevee_specular();
 
 	register_node_type_sh_output_lamp();
 	register_node_type_sh_output_material();
+	register_node_type_sh_output_eevee_material();
 	register_node_type_sh_output_world();
 	register_node_type_sh_output_linestyle();
 
@@ -3785,4 +3788,21 @@ bool BKE_node_tree_iter_step(struct NodeTreeIterStore *ntreeiter,
 	}
 
 	return true;
+}
+
+/* -------------------------------------------------------------------- */
+/* NodeTree kernel functions */
+
+void BKE_nodetree_remove_layer_n(bNodeTree *ntree, Scene *scene, const int layer_index)
+{
+	for (bNode *node = ntree->nodes.first; node; node = node->next) {
+		if (node->type == CMP_NODE_R_LAYERS && (Scene *)node->id == scene) {
+			if (node->custom1 == layer_index) {
+				node->custom1 = 0;
+			}
+			else if (node->custom1 > layer_index) {
+				node->custom1--;
+			}
+		}
+	}
 }
