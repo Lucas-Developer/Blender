@@ -233,10 +233,8 @@ void OSLShaderManager::shading_system_init()
 			"glossy",			/* PATH_RAY_GLOSSY */
 			"singular",			/* PATH_RAY_SINGULAR */
 			"transparent",		/* PATH_RAY_TRANSPARENT */
-			"shadow",			/* PATH_RAY_SHADOW_OPAQUE_NON_CATCHER */
-			"shadow",			/* PATH_RAY_SHADOW_OPAQUE_CATCHER */
-			"shadow",			/* PATH_RAY_SHADOW_TRANSPARENT_NON_CATCHER */
-			"shadow",			/* PATH_RAY_SHADOW_TRANSPARENT_CATCHER */
+			"shadow",			/* PATH_RAY_SHADOW_OPAQUE */
+			"shadow",			/* PATH_RAY_SHADOW_TRANSPARENT */
 
 			"__unused__",
 			"__unused__",

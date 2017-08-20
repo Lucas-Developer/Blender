@@ -865,7 +865,7 @@ BVHNode *BVHBuild::create_object_leaf_nodes(const BVHReference *ref, int start, 
 			prim_time[start] = make_float2(ref->time_from(), ref->time_to());
 		}
 
-		const uint visibility = objects[ref->prim_object()]->visibility_for_tracing();
+		uint visibility = objects[ref->prim_object()]->visibility;
 		BVHNode *leaf_node =  new LeafNode(ref->bounds(), visibility, start, start+1);
 		leaf_node->time_from = ref->time_from();
 		leaf_node->time_to = ref->time_to();
@@ -939,7 +939,7 @@ BVHNode* BVHBuild::create_leaf_node(const BVHRange& range,
 			                                         ref.time_to()));
 
 			bounds[type_index].grow(ref.bounds());
-			visibility[type_index] |= objects[ref.prim_object()]->visibility_for_tracing();
+			visibility[type_index] |= objects[ref.prim_object()]->visibility;
 			if(ref.prim_type() & PRIMITIVE_ALL_CURVE) {
 				visibility[type_index] |= PATH_RAY_CURVE;
 			}

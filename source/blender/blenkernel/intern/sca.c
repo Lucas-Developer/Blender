@@ -72,7 +72,7 @@ void free_sensors(ListBase *lb)
 	}
 }
 
-bSensor *copy_sensor(bSensor *sens, const int UNUSED(flag))
+bSensor *copy_sensor(bSensor *sens)
 {
 	bSensor *sensn;
 	
@@ -87,14 +87,14 @@ bSensor *copy_sensor(bSensor *sens, const int UNUSED(flag))
 	return sensn;
 }
 
-void copy_sensors(ListBase *lbn, const ListBase *lbo, const int flag)
+void copy_sensors(ListBase *lbn, const ListBase *lbo)
 {
 	bSensor *sens, *sensn;
 	
 	lbn->first= lbn->last= NULL;
 	sens= lbo->first;
 	while (sens) {
-		sensn= copy_sensor(sens, flag);
+		sensn= copy_sensor(sens);
 		BLI_addtail(lbn, sensn);
 		sens= sens->next;
 	}
@@ -234,7 +234,7 @@ void free_controllers(ListBase *lb)
 	}
 }
 
-bController *copy_controller(bController *cont, const int UNUSED(flag))
+bController *copy_controller(bController *cont)
 {
 	bController *contn;
 	
@@ -251,14 +251,14 @@ bController *copy_controller(bController *cont, const int UNUSED(flag))
 	return contn;
 }
 
-void copy_controllers(ListBase *lbn, const ListBase *lbo, const int flag)
+void copy_controllers(ListBase *lbn, const ListBase *lbo)
 {
 	bController *cont, *contn;
 	
 	lbn->first= lbn->last= NULL;
 	cont= lbo->first;
 	while (cont) {
-		contn= copy_controller(cont, flag);
+		contn= copy_controller(cont);
 		BLI_addtail(lbn, contn);
 		cont= cont->next;
 	}
@@ -359,7 +359,7 @@ void free_actuators(ListBase *lb)
 	}
 }
 
-bActuator *copy_actuator(bActuator *act, const int flag)
+bActuator *copy_actuator(bActuator *act)
 {
 	bActuator *actn;
 	
@@ -374,31 +374,29 @@ bActuator *copy_actuator(bActuator *act, const int flag)
 		case ACT_SHAPEACTION:
 		{
 			bActionActuator *aa = (bActionActuator *)act->data;
-			if ((flag & LIB_ID_CREATE_NO_USER_REFCOUNT) == 0) {
+			if (aa->act)
 				id_us_plus((ID *)aa->act);
-			}
 			break;
 		}
 		case ACT_SOUND:
 		{
 			bSoundActuator *sa = (bSoundActuator *)act->data;
-			if ((flag & LIB_ID_CREATE_NO_USER_REFCOUNT) == 0) {
+			if (sa->sound)
 				id_us_plus((ID *)sa->sound);
-			}
 			break;
 		}
 	}
 	return actn;
 }
 
-void copy_actuators(ListBase *lbn, const ListBase *lbo, const int flag)
+void copy_actuators(ListBase *lbn, const ListBase *lbo)
 {
 	bActuator *act, *actn;
 	
 	lbn->first= lbn->last= NULL;
 	act= lbo->first;
 	while (act) {
-		actn= copy_actuator(act, flag);
+		actn= copy_actuator(act);
 		BLI_addtail(lbn, actn);
 		act= act->next;
 	}
@@ -785,11 +783,11 @@ void BKE_sca_logic_links_remap(Main *bmain, Object *ob_old, Object *ob_new)
  * Handle the copying of logic data into a new object, including internal logic links update.
  * External links (links between logic bricks of different objects) must be handled separately.
  */
-void BKE_sca_logic_copy(Object *ob_new, const Object *ob, const int flag)
+void BKE_sca_logic_copy(Object *ob_new, const Object *ob)
 {
-	copy_sensors(&ob_new->sensors, &ob->sensors, flag);
-	copy_controllers(&ob_new->controllers, &ob->controllers, flag);
-	copy_actuators(&ob_new->actuators, &ob->actuators, flag);
+	copy_sensors(&ob_new->sensors, &ob->sensors);
+	copy_controllers(&ob_new->controllers, &ob->controllers);
+	copy_actuators(&ob_new->actuators, &ob->actuators);
 
 	for (bSensor *sens = ob_new->sensors.first; sens; sens = sens->next) {
 		if (sens->flag & SENS_NEW) {

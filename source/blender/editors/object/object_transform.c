@@ -414,10 +414,7 @@ static void ignore_parent_tx(Main *bmain, Scene *scene, Object *ob)
 	}
 }
 
-static int apply_objects_internal(
-        bContext *C, ReportList *reports,
-        bool apply_loc, bool apply_rot, bool apply_scale,
-        bool do_props)
+static int apply_objects_internal(bContext *C, ReportList *reports, bool apply_loc, bool apply_rot, bool apply_scale)
 {
 	Main *bmain = CTX_data_main(C);
 	Scene *scene = CTX_data_scene(C);
@@ -534,7 +531,7 @@ static int apply_objects_internal(
 			BKE_mesh_calc_normals(me);
 		}
 		else if (ob->type == OB_ARMATURE) {
-			ED_armature_apply_transform(ob, mat, do_props);
+			ED_armature_apply_transform(ob, mat);
 		}
 		else if (ob->type == OB_LATTICE) {
 			Lattice *lt = ob->data;
@@ -543,12 +540,12 @@ static int apply_objects_internal(
 		}
 		else if (ob->type == OB_MBALL) {
 			MetaBall *mb = ob->data;
-			BKE_mball_transform(mb, mat, do_props);
+			BKE_mball_transform(mb, mat);
 		}
 		else if (ELEM(ob->type, OB_CURVE, OB_SURF)) {
 			Curve *cu = ob->data;
 			scale = mat3_to_scale(rsmat);
-			BKE_curve_transform_ex(cu, mat, true, do_props, scale);
+			BKE_curve_transform_ex(cu, mat, true, scale);
 		}
 		else if (ob->type == OB_FONT) {
 			Curve *cu = ob->data;
@@ -564,9 +561,7 @@ static int apply_objects_internal(
 				tb->h *= scale;
 			}
 
-			if (do_props) {
-				cu->fsize *= scale;
-			}
+			cu->fsize *= scale;
 		}
 		else if (ob->type == OB_CAMERA) {
 			MovieClip *clip = BKE_object_movieclip_get(scene, ob, false);
@@ -682,10 +677,9 @@ static int object_transform_apply_exec(bContext *C, wmOperator *op)
 	const bool loc = RNA_boolean_get(op->ptr, "location");
 	const bool rot = RNA_boolean_get(op->ptr, "rotation");
 	const bool sca = RNA_boolean_get(op->ptr, "scale");
-	const bool do_props = RNA_boolean_get(op->ptr, "properties");
 
 	if (loc || rot || sca) {
-		return apply_objects_internal(C, op->reports, loc, rot, sca, do_props);
+		return apply_objects_internal(C, op->reports, loc, rot, sca);
 	}
 	else {
 		/* allow for redo */
@@ -710,8 +704,6 @@ void OBJECT_OT_transform_apply(wmOperatorType *ot)
 	RNA_def_boolean(ot->srna, "location", 0, "Location", "");
 	RNA_def_boolean(ot->srna, "rotation", 0, "Rotation", "");
 	RNA_def_boolean(ot->srna, "scale", 0, "Scale", "");
-	RNA_def_boolean(ot->srna, "properties", true, "Apply Properties",
-	                "Modify properties such as curve vertex radius, font size and bone envelope");
 }
 
 /********************* Set Object Center ************************/

@@ -152,7 +152,7 @@ Brush *BKE_brush_add(Main *bmain, const char *name, short ob_mode)
 {
 	Brush *brush;
 
-	brush = BKE_libblock_alloc(bmain, ID_BR, name, 0);
+	brush = BKE_libblock_alloc(bmain, ID_BR, name);
 
 	BKE_brush_init(brush);
 
@@ -172,38 +172,34 @@ struct Brush *BKE_brush_first_search(struct Main *bmain, short ob_mode)
 	return NULL;
 }
 
-/**
- * Only copy internal data of Brush ID from source to already allocated/initialized destination.
- * You probably nerver want to use that directly, use id_copy or BKE_id_copy_ex for typical needs.
- *
- * WARNING! This function will not handle ID user count!
- *
- * \param flag  Copying options (see BKE_library.h's LIB_ID_COPY_... flags for more).
- */
-void BKE_brush_copy_data(Main *UNUSED(bmain), Brush *brush_dst, const Brush *brush_src, const int flag)
-{
-	if (brush_src->icon_imbuf) {
-		brush_dst->icon_imbuf = IMB_dupImBuf(brush_src->icon_imbuf);
-	}
-
-	if ((flag & LIB_ID_COPY_NO_PREVIEW) == 0) {
-		BKE_previewimg_id_copy(&brush_dst->id, &brush_src->id);
-	}
-	else {
-		brush_dst->preview = NULL;
-	}
-
-	brush_dst->curve = curvemapping_copy(brush_src->curve);
-
-	/* enable fake user by default */
-	id_fake_user_set(&brush_dst->id);
-}
-
 Brush *BKE_brush_copy(Main *bmain, const Brush *brush)
 {
-	Brush *brush_copy;
-	BKE_id_copy_ex(bmain, &brush->id, (ID **)&brush_copy, 0, false);
-	return brush_copy;
+	Brush *brushn;
+	
+	brushn = BKE_libblock_copy(bmain, &brush->id);
+
+	if (brush->mtex.tex)
+		id_us_plus((ID *)brush->mtex.tex);
+
+	if (brush->mask_mtex.tex)
+		id_us_plus((ID *)brush->mask_mtex.tex);
+
+	if (brush->paint_curve)
+		id_us_plus((ID *)brush->paint_curve);
+
+	if (brush->icon_imbuf)
+		brushn->icon_imbuf = IMB_dupImBuf(brush->icon_imbuf);
+
+	brushn->preview = NULL;
+
+	brushn->curve = curvemapping_copy(brush->curve);
+
+	/* enable fake user by default */
+	id_fake_user_set(&brushn->id);
+
+	BKE_id_copy_ensure_local(bmain, &brush->id, &brushn->id);
+
+	return brushn;
 }
 
 /** Free (or release) any data used by this brush (does not free the brush itself). */

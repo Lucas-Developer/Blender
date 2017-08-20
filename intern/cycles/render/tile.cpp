@@ -88,14 +88,12 @@ enum SpiralDirection {
 }  /* namespace */
 
 TileManager::TileManager(bool progressive_, int num_samples_, int2 tile_size_, int start_resolution_,
-                         bool preserve_tile_device_, bool background_, TileOrder tile_order_,
-                         int num_devices_, int pixel_size_)
+                         bool preserve_tile_device_, bool background_, TileOrder tile_order_, int num_devices_)
 {
 	progressive = progressive_;
 	tile_size = tile_size_;
 	tile_order = tile_order_;
 	start_resolution = start_resolution_;
-	pixel_size = pixel_size_;
 	num_samples = num_samples_;
 	num_devices = num_devices_;
 	preserve_tile_device = preserve_tile_device_;
@@ -165,17 +163,15 @@ void TileManager::set_samples(int num_samples_)
 		uint64_t pixel_samples = 0;
 		/* While rendering in the viewport, the initial preview resolution is increased to the native resolution
 		 * before the actual rendering begins. Therefore, additional pixel samples will be rendered. */
-		int divider = max(get_divider(params.width, params.height, start_resolution) / 2, pixel_size);
-		while(divider > pixel_size) {
+		int divider = get_divider(params.width, params.height, start_resolution) / 2;
+		while(divider > 1) {
 			int image_w = max(1, params.width/divider);
 			int image_h = max(1, params.height/divider);
 			pixel_samples += image_w * image_h;
 			divider >>= 1;
 		}
 
-		int image_w = max(1, params.width/divider);
-		int image_h = max(1, params.height/divider);
-		state.total_pixel_samples = pixel_samples + (uint64_t)get_num_effective_samples() * image_w*image_h;
+		state.total_pixel_samples = pixel_samples + (uint64_t)get_num_effective_samples() * params.width*params.height;
 		if(schedule_denoising) {
 			state.total_pixel_samples += params.width*params.height;
 		}
@@ -475,7 +471,7 @@ bool TileManager::done()
 	int end_sample = (range_num_samples == -1)
 	                     ? num_samples
 	                     : range_start_sample + range_num_samples;
-	return (state.resolution_divider == pixel_size) &&
+	return (state.resolution_divider == 1) &&
 	       (state.sample+state.num_samples >= end_sample);
 }
 
@@ -484,9 +480,9 @@ bool TileManager::next()
 	if(done())
 		return false;
 
-	if(progressive && state.resolution_divider > pixel_size) {
+	if(progressive && state.resolution_divider > 1) {
 		state.sample = 0;
-		state.resolution_divider = max(state.resolution_divider/2, pixel_size);
+		state.resolution_divider /= 2;
 		state.num_samples = 1;
 		set_tiles();
 	}
@@ -500,7 +496,7 @@ bool TileManager::next()
 		else
 			state.num_samples = range_num_samples;
 
-		state.resolution_divider = pixel_size;
+		state.resolution_divider = 1;
 		set_tiles();
 	}
 

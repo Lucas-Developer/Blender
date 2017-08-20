@@ -32,11 +32,14 @@ class AddPresetIntegrator(AddPresetBase, Operator):
 
     preset_values = [
         "cycles.max_bounces",
+        "cycles.min_bounces",
         "cycles.diffuse_bounces",
         "cycles.glossy_bounces",
         "cycles.transmission_bounces",
         "cycles.volume_bounces",
+        "cycles.transparent_min_bounces",
         "cycles.transparent_max_bounces",
+        "cycles.use_transparent_shadows",
         "cycles.caustics_reflective",
         "cycles.caustics_refractive",
         "cycles.blur_glossy"
@@ -67,6 +70,7 @@ class AddPresetSampling(AddPresetBase, Operator):
         "cycles.mesh_light_samples",
         "cycles.subsurface_samples",
         "cycles.volume_samples",
+        "cycles.use_square_samples",
         "cycles.progressive",
         "cycles.seed",
         "cycles.sample_clamp_direct",

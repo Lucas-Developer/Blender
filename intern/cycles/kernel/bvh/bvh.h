@@ -233,7 +233,7 @@ ccl_device_intersect void scene_intersect_subsurface(KernelGlobals *kg,
 ccl_device_intersect bool scene_intersect_shadow_all(KernelGlobals *kg,
                                                      const Ray *ray,
                                                      Intersection *isect,
-                                                     uint visibility,
+                                                     int skip_object,
                                                      uint max_hits,
                                                      uint *num_hits)
 {
@@ -244,7 +244,7 @@ ccl_device_intersect bool scene_intersect_shadow_all(KernelGlobals *kg,
 			return bvh_intersect_shadow_all_hair_motion(kg,
 			                                            ray,
 			                                            isect,
-			                                            visibility,
+			                                            skip_object,
 			                                            max_hits,
 			                                            num_hits);
 		}
@@ -253,7 +253,7 @@ ccl_device_intersect bool scene_intersect_shadow_all(KernelGlobals *kg,
 		return bvh_intersect_shadow_all_motion(kg,
 		                                       ray,
 		                                       isect,
-		                                       visibility,
+		                                       skip_object,
 		                                       max_hits,
 		                                       num_hits);
 	}
@@ -264,7 +264,7 @@ ccl_device_intersect bool scene_intersect_shadow_all(KernelGlobals *kg,
 		return bvh_intersect_shadow_all_hair(kg,
 		                                     ray,
 		                                     isect,
-		                                     visibility,
+		                                     skip_object,
 		                                     max_hits,
 		                                     num_hits);
 	}
@@ -275,7 +275,7 @@ ccl_device_intersect bool scene_intersect_shadow_all(KernelGlobals *kg,
 		return bvh_intersect_shadow_all_instancing(kg,
 		                                           ray,
 		                                           isect,
-		                                           visibility,
+		                                           skip_object,
 		                                           max_hits,
 		                                           num_hits);
 	}
@@ -284,7 +284,7 @@ ccl_device_intersect bool scene_intersect_shadow_all(KernelGlobals *kg,
 	return bvh_intersect_shadow_all(kg,
 	                                ray,
 	                                isect,
-	                                visibility,
+	                                skip_object,
 	                                max_hits,
 	                                num_hits);
 }

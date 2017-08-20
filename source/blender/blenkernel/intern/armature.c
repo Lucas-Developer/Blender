@@ -83,7 +83,7 @@ bArmature *BKE_armature_add(Main *bmain, const char *name)
 {
 	bArmature *arm;
 
-	arm = BKE_libblock_alloc(bmain, ID_AR, name, 0);
+	arm = BKE_libblock_alloc(bmain, ID_AR, name);
 	arm->deformflag = ARM_DEF_VGROUP | ARM_DEF_ENVELOPE;
 	arm->flag = ARM_COL_CUSTOM; /* custom bone-group colors */
 	arm->layer = 1;
@@ -150,70 +150,54 @@ void BKE_armature_make_local(Main *bmain, bArmature *arm, const bool lib_local)
 	BKE_id_make_local_generic(bmain, &arm->id, true, lib_local);
 }
 
-static void copy_bonechildren(
-        Bone *bone_dst, const Bone *bone_src, const Bone *bone_src_act, Bone **r_bone_dst_act, const int flag)
+static void copy_bonechildren(Bone *newBone, const Bone *oldBone, const Bone *actBone, Bone **newActBone)
 {
-	Bone *bone_src_child, *bone_dst_child;
+	Bone *curBone, *newChildBone;
 
-	if (bone_src == bone_src_act) {
-		*r_bone_dst_act = bone_dst;
-	}
+	if (oldBone == actBone)
+		*newActBone = newBone;
 
-	if (bone_src->prop) {
-		bone_dst->prop = IDP_CopyProperty_ex(bone_src->prop, flag);
-	}
+	if (oldBone->prop)
+		newBone->prop = IDP_CopyProperty(oldBone->prop);
 
 	/* Copy this bone's list */
-	BLI_duplicatelist(&bone_dst->childbase, &bone_src->childbase);
+	BLI_duplicatelist(&newBone->childbase, &oldBone->childbase);
 
 	/* For each child in the list, update it's children */
-	for (bone_src_child = bone_src->childbase.first, bone_dst_child = bone_dst->childbase.first;
-	     bone_src_child;
-	     bone_src_child = bone_src_child->next, bone_dst_child = bone_dst_child->next)
-	{
-		bone_dst_child->parent = bone_dst;
-		copy_bonechildren(bone_dst_child, bone_src_child, bone_src_act, r_bone_dst_act, flag);
+	newChildBone = newBone->childbase.first;
+	for (curBone = oldBone->childbase.first; curBone; curBone = curBone->next) {
+		newChildBone->parent = newBone;
+		copy_bonechildren(newChildBone, curBone, actBone, newActBone);
+		newChildBone = newChildBone->next;
 	}
-}
-
-/**
- * Only copy internal data of Armature ID from source to already allocated/initialized destination.
- * You probably nerver want to use that directly, use id_copy or BKE_id_copy_ex for typical needs.
- *
- * WARNING! This function will not handle ID user count!
- *
- * \param flag  Copying options (see BKE_library.h's LIB_ID_COPY_... flags for more).
- */
-void BKE_armature_copy_data(Main *UNUSED(bmain), bArmature *arm_dst, const bArmature *arm_src, const int flag)
-{
-	Bone *bone_src, *bone_dst;
-	Bone *bone_dst_act = NULL;
-
-	/* We never handle usercount here for own data. */
-	const int flag_subdata = flag | LIB_ID_CREATE_NO_USER_REFCOUNT;
-
-	BLI_duplicatelist(&arm_dst->bonebase, &arm_src->bonebase);
-
-	/* Duplicate the childrens' lists */
-	bone_dst = arm_dst->bonebase.first;
-	for (bone_src = arm_src->bonebase.first; bone_src; bone_src = bone_src->next) {
-		bone_dst->parent = NULL;
-		copy_bonechildren(bone_dst, bone_src, arm_src->act_bone, &bone_dst_act, flag_subdata);
-		bone_dst = bone_dst->next;
-	}
-
-	arm_dst->act_bone = bone_dst_act;
-
-	arm_dst->edbo = NULL;
-	arm_dst->act_edbone = NULL;
-	arm_dst->sketch = NULL;
 }
 
 bArmature *BKE_armature_copy(Main *bmain, const bArmature *arm)
 {
-	bArmature *arm_copy;
-	BKE_id_copy_ex(bmain, &arm->id, (ID **)&arm_copy, 0, false);
-	return arm_copy;
+	bArmature *newArm;
+	Bone *oldBone, *newBone;
+	Bone *newActBone = NULL;
+
+	newArm = BKE_libblock_copy(bmain, &arm->id);
+	BLI_duplicatelist(&newArm->bonebase, &arm->bonebase);
+
+	/* Duplicate the childrens' lists */
+	newBone = newArm->bonebase.first;
+	for (oldBone = arm->bonebase.first; oldBone; oldBone = oldBone->next) {
+		newBone->parent = NULL;
+		copy_bonechildren(newBone, oldBone, arm->act_bone, &newActBone);
+		newBone = newBone->next;
+	}
+
+	newArm->act_bone = newActBone;
+
+	newArm->edbo = NULL;
+	newArm->act_edbone = NULL;
+	newArm->sketch = NULL;
+
+	BKE_id_copy_ensure_local(bmain, &arm->id, &newArm->id);
+
+	return newArm;
 }
 
 static Bone *get_named_bone_bonechildren(ListBase *lb, const char *name)

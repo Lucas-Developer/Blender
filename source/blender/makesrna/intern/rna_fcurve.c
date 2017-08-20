@@ -495,7 +495,10 @@ static void rna_FCurve_active_modifier_set(PointerRNA *ptr, PointerRNA value)
 
 static FModifier *rna_FCurve_modifiers_new(FCurve *fcu, int type)
 {
-	return add_fmodifier(&fcu->modifiers, type);
+	FModifier *fcm = add_fmodifier(&fcu->modifiers, type, fcu);
+	if (type == FMODIFIER_TYPE_CYCLES)
+		calchandles_fcurve(fcu);
+	return fcm;
 }
 
 static void rna_FCurve_modifiers_remove(FCurve *fcu, ReportList *reports, PointerRNA *fcm_ptr)
@@ -506,8 +509,13 @@ static void rna_FCurve_modifiers_remove(FCurve *fcu, ReportList *reports, Pointe
 		return;
 	}
 
+	bool update = (fcm->type == FMODIFIER_TYPE_CYCLES);
+
 	remove_fmodifier(&fcu->modifiers, fcm);
 	RNA_POINTER_INVALIDATE(fcm_ptr);
+
+	if (update)
+		calchandles_fcurve(fcu);
 }
 
 static void rna_FModifier_active_set(PointerRNA *ptr, int UNUSED(value))
@@ -586,10 +594,14 @@ static void rna_FModifier_blending_range(PointerRNA *ptr, float *min, float *max
 static void rna_FModifier_update(Main *UNUSED(bmain), Scene *UNUSED(scene), PointerRNA *ptr)
 {
 	ID *id = ptr->id.data;
+	FModifier *fcm = (FModifier *)ptr->data;
 	AnimData *adt = BKE_animdata_from_id(id);
 	DAG_id_tag_update(id, (GS(id->name) == ID_OB) ? OB_RECALC_OB : OB_RECALC_DATA);
 	if (adt != NULL) {
 		adt->recalc |= ADT_RECALC_ANIM;
+	}
+	if (fcm->curve && fcm->type == FMODIFIER_TYPE_CYCLES) {
+		calchandles_fcurve(fcm->curve);
 	}
 }
 
@@ -1891,6 +1903,11 @@ static void rna_def_fcurve(BlenderRNA *brna)
 		                      "Use custom hand-picked color for F-Curve"},
 		{0, NULL, 0, NULL, NULL}
 	};
+	static EnumPropertyItem prop_mode_smoothing_items[] = {
+		{FCURVE_SMOOTH_NONE, "NONE", 0, "None", "Auto handles only take adjacent keys into account (legacy mode)"},
+		{FCURVE_SMOOTH_CONT_ACCEL, "CONT_ACCEL", 0, "Continuous Acceleration", "Auto handles are placed to avoid jumps in acceleration"},
+		{0, NULL, 0, NULL, NULL}
+	};
 
 	srna = RNA_def_struct(brna, "FCurve", NULL);
 	RNA_def_struct_ui_text(srna, "F-Curve", "F-Curve defining values of a period of time");
@@ -1963,6 +1980,11 @@ static void rna_def_fcurve(BlenderRNA *brna)
 	RNA_def_property_boolean_negative_sdna(prop, NULL, "flag", FCURVE_VISIBLE);
 	RNA_def_property_ui_text(prop, "Hide", "F-Curve and its keyframes are hidden in the Graph Editor graphs");
 	RNA_def_property_update(prop, NC_SPACE | ND_SPACE_GRAPH, NULL);
+
+	prop = RNA_def_property(srna, "auto_smoothing", PROP_ENUM, PROP_NONE);
+	RNA_def_property_enum_items(prop, prop_mode_smoothing_items);
+	RNA_def_property_ui_text(prop, "Auto Handle Smoothing", "Algorithm used to compute automatic handles");
+	RNA_def_property_update(prop, NC_ANIMATION | ND_KEYFRAME | NA_EDITED, "rna_FCurve_update_data");
 
 	/* State Info (for Debugging) */
 	prop = RNA_def_property(srna, "is_valid", PROP_BOOLEAN, PROP_NONE);

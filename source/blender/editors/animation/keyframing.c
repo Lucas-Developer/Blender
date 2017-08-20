@@ -186,6 +186,7 @@ FCurve *verify_fcurve(bAction *act, const char group[], PointerRNA *ptr,
 		fcu = MEM_callocN(sizeof(FCurve), "FCurve");
 		
 		fcu->flag = (FCURVE_VISIBLE | FCURVE_SELECTED);
+		fcu->auto_smoothing = FCURVE_SMOOTH_CONT_ACCEL;
 		if (BLI_listbase_is_empty(&act->curves))
 			fcu->flag |= FCURVE_ACTIVE;  /* first one added active */
 			
@@ -1786,9 +1787,7 @@ static int insert_key_button_exec(bContext *C, wmOperator *op)
 			NlaStrip *strip = (NlaStrip *)ptr.data;
 			FCurve *fcu = list_find_fcurve(&strip->fcurves, RNA_property_identifier(prop), index);
 			
-			if (fcu) {
-				success = insert_keyframe_direct(op->reports, ptr, prop, fcu, cfra, ts->keyframe_type, 0);
-			}
+			success = insert_keyframe_direct(op->reports, ptr, prop, fcu, cfra, ts->keyframe_type, 0);
 		}
 		else if (UI_but_flag_is_set(but, UI_BUT_DRIVEN)) {
 			/* Driven property - Find driver */
@@ -1893,27 +1892,27 @@ static int delete_key_button_exec(bContext *C, wmOperator *op)
 			NlaStrip *strip = (NlaStrip *)ptr.data;
 			FCurve *fcu = list_find_fcurve(&strip->fcurves, RNA_property_identifier(prop), 0);
 			
-			if (fcu) {
-				if (BKE_fcurve_is_protected(fcu)) {
-					BKE_reportf(op->reports, RPT_WARNING,
-					            "Not deleting keyframe for locked F-Curve for NLA Strip influence on %s - %s '%s'",
-					            strip->name, BKE_idcode_to_name(GS(id->name)), id->name + 2);
-				}
-				else {
-					/* remove the keyframe directly
-					 * NOTE: cannot use delete_keyframe_fcurve(), as that will free the curve,
-					 *       and delete_keyframe() expects the FCurve to be part of an action
-					 */
-					bool found = false;
-					int i;
-					
-					/* try to find index of beztriple to get rid of */
-					i = binarysearch_bezt_index(fcu->bezt, cfra, fcu->totvert, &found);
-					if (found) {
-						/* delete the key at the index (will sanity check + do recalc afterwards) */
-						delete_fcurve_key(fcu, i, 1);
-						success = true;
-					}
+			BLI_assert(fcu != NULL); /* NOTE: This should be true, or else we wouldn't be able to get here */
+			
+			if (BKE_fcurve_is_protected(fcu)) {
+				BKE_reportf(op->reports, RPT_WARNING,
+				            "Not deleting keyframe for locked F-Curve for NLA Strip influence on %s - %s '%s'",
+				            strip->name, BKE_idcode_to_name(GS(id->name)), id->name + 2);
+			}
+			else {
+				/* remove the keyframe directly
+				 * NOTE: cannot use delete_keyframe_fcurve(), as that will free the curve,
+				 *       and delete_keyframe() expects the FCurve to be part of an action
+				 */
+				bool found = false;
+				int i;
+				
+				/* try to find index of beztriple to get rid of */
+				i = binarysearch_bezt_index(fcu->bezt, cfra, fcu->totvert, &found);
+				if (found) {
+					/* delete the key at the index (will sanity check + do recalc afterwards) */
+					delete_fcurve_key(fcu, i, 1);
+					success = true;
 				}
 			}
 		}

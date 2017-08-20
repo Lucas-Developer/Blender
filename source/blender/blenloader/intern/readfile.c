@@ -638,7 +638,7 @@ static Main *blo_find_main(FileData *fd, const char *filepath, const char *relab
 	
 	/* Add library datablock itself to 'main' Main, since libraries are **never** linked data.
 	 * Fixes bug where you could end with all ID_LI datablocks having the same name... */
-	lib = BKE_libblock_alloc(mainlist->first, ID_LI, "Lib", 0);
+	lib = BKE_libblock_alloc(mainlist->first, ID_LI, "Lib");
 	lib->id.us = ID_FAKE_USERS(lib);  /* Important, consistency with main ID reading code from read_libblock(). */
 	BLI_strncpy(lib->name, filepath, sizeof(lib->name));
 	BLI_strncpy(lib->filepath, name1, sizeof(lib->filepath));
@@ -2389,11 +2389,13 @@ static void lib_link_constraint_channels(FileData *fd, ID *id, ListBase *chanbas
 
 /* Data Linking ----------------------------- */
 
-static void lib_link_fmodifiers(FileData *fd, ID *id, ListBase *list)
+static void lib_link_fmodifiers(FileData *fd, ID *id, ListBase *list, FCurve *curve)
 {
 	FModifier *fcm;
 	
 	for (fcm = list->first; fcm; fcm = fcm->next) {
+		fcm->curve = curve;
+
 		/* data for specific modifiers */
 		switch (fcm->type) {
 			case FMODIFIER_TYPE_PYTHON:
@@ -2435,19 +2437,20 @@ static void lib_link_fcurves(FileData *fd, ID *id, ListBase *list)
 		}
 		
 		/* modifiers */
-		lib_link_fmodifiers(fd, id, &fcu->modifiers);
+		lib_link_fmodifiers(fd, id, &fcu->modifiers, fcu);
 	}
 }
 
 
 /* NOTE: this assumes that link_list has already been called on the list */
-static void direct_link_fmodifiers(FileData *fd, ListBase *list)
+static void direct_link_fmodifiers(FileData *fd, ListBase *list, FCurve *curve)
 {
 	FModifier *fcm;
 	
 	for (fcm = list->first; fcm; fcm = fcm->next) {
 		/* relink general data */
 		fcm->data  = newdataadr(fd, fcm->data);
+		fcm->curve = curve;
 		
 		/* do relinking of data for specific types */
 		switch (fcm->type) {
@@ -2506,6 +2509,12 @@ static void direct_link_fcurves(FileData *fd, ListBase *list)
 		 */
 		fcu->flag &= ~FCURVE_DISABLED;
 		
+		/* TEMPORARY HACK */
+		if (fcu->flag & (1<<13)) {
+			fcu->flag &= ~(1<<13);
+			fcu->auto_smoothing = FCURVE_SMOOTH_CONT_ACCEL;
+		}
+
 		/* driver */
 		fcu->driver= newdataadr(fd, fcu->driver);
 		if (fcu->driver) {
@@ -2537,7 +2546,7 @@ static void direct_link_fcurves(FileData *fd, ListBase *list)
 		
 		/* modifiers */
 		link_list(fd, &fcu->modifiers);
-		direct_link_fmodifiers(fd, &fcu->modifiers);
+		direct_link_fmodifiers(fd, &fcu->modifiers, fcu);
 	}
 }
 
@@ -2642,7 +2651,7 @@ static void direct_link_nladata_strips(FileData *fd, ListBase *list)
 		
 		/* strip's F-Modifiers */
 		link_list(fd, &strip->modifiers);
-		direct_link_fmodifiers(fd, &strip->modifiers);
+		direct_link_fmodifiers(fd, &strip->modifiers, NULL);
 	}
 }
 

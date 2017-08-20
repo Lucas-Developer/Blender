@@ -5371,8 +5371,9 @@ Sequence *BKE_sequencer_add_movie_strip(bContext *C, ListBase *seqbasep, SeqLoad
 	return seq;
 }
 
-static Sequence *seq_dupli(const Scene *scene_src, Scene *scene_dst, Sequence *seq, int dupe_flag, const int flag)
+static Sequence *seq_dupli(Scene *scene, Scene *scene_to, Sequence *seq, int dupe_flag)
 {
+	Scene *sce_audio = scene_to ? scene_to : scene;
 	Sequence *seqn = MEM_dupallocN(seq);
 
 	seq->tmp = seqn;
@@ -5396,7 +5397,7 @@ static Sequence *seq_dupli(const Scene *scene_src, Scene *scene_dst, Sequence *s
 	}
 
 	if (seq->prop) {
-		seqn->prop = IDP_CopyProperty_ex(seq->prop, flag);
+		seqn->prop = IDP_CopyProperty(seq->prop);
 	}
 
 	if (seqn->modifiers.first) {
@@ -5415,7 +5416,7 @@ static Sequence *seq_dupli(const Scene *scene_src, Scene *scene_dst, Sequence *s
 	else if (seq->type == SEQ_TYPE_SCENE) {
 		seqn->strip->stripdata = NULL;
 		if (seq->scene_sound)
-			seqn->scene_sound = BKE_sound_scene_add_scene_sound_defaults(scene_dst, seqn);
+			seqn->scene_sound = BKE_sound_scene_add_scene_sound_defaults(sce_audio, seqn);
 	}
 	else if (seq->type == SEQ_TYPE_MOVIECLIP) {
 		/* avoid assert */
@@ -5432,11 +5433,9 @@ static Sequence *seq_dupli(const Scene *scene_src, Scene *scene_dst, Sequence *s
 		seqn->strip->stripdata =
 		        MEM_dupallocN(seq->strip->stripdata);
 		if (seq->scene_sound)
-			seqn->scene_sound = BKE_sound_add_scene_sound_defaults(scene_dst, seqn);
+			seqn->scene_sound = BKE_sound_add_scene_sound_defaults(sce_audio, seqn);
 
-		if ((flag & LIB_ID_CREATE_NO_USER_REFCOUNT) == 0) {
-			id_us_plus((ID *)seqn->sound);
-		}
+		id_us_plus((ID *)seqn->sound);
 	}
 	else if (seq->type == SEQ_TYPE_IMAGE) {
 		seqn->strip->stripdata =
@@ -5456,15 +5455,11 @@ static Sequence *seq_dupli(const Scene *scene_src, Scene *scene_dst, Sequence *s
 		BLI_assert(0);
 	}
 
-	if (scene_src == scene_dst) {
-		if (dupe_flag & SEQ_DUPE_UNIQUE_NAME) {
-			BKE_sequence_base_unique_name_recursive(&scene_dst->ed->seqbase, seqn);
-		}
+	if (dupe_flag & SEQ_DUPE_UNIQUE_NAME)
+		BKE_sequence_base_unique_name_recursive(&scene->ed->seqbase, seqn);
 
-		if (dupe_flag & SEQ_DUPE_ANIM) {
-			BKE_sequencer_dupe_animdata(scene_dst, seq->name + 2, seqn->name + 2);
-		}
-	}
+	if (dupe_flag & SEQ_DUPE_ANIM)
+		BKE_sequencer_dupe_animdata(scene, seq->name + 2, seqn->name + 2);
 
 	return seqn;
 }
@@ -5491,16 +5486,16 @@ static void seq_new_fix_links_recursive(Sequence *seq)
 	}
 }
 
-Sequence *BKE_sequence_dupli_recursive(const Scene *scene_src, Scene *scene_dst, Sequence *seq, int dupe_flag)
+Sequence *BKE_sequence_dupli_recursive(Scene *scene, Scene *scene_to, Sequence *seq, int dupe_flag)
 {
 	Sequence *seqn;
 
 	seq->tmp = NULL;
-	seqn = seq_dupli(scene_src, scene_dst, seq, dupe_flag, 0);
+	seqn = seq_dupli(scene, scene_to, seq, dupe_flag);
 	if (seq->type == SEQ_TYPE_META) {
 		Sequence *s;
 		for (s = seq->seqbase.first; s; s = s->next) {
-			Sequence *n = BKE_sequence_dupli_recursive(scene_src, scene_dst, s, dupe_flag);
+			Sequence *n = BKE_sequence_dupli_recursive(scene, scene_to, s, dupe_flag);
 			if (n) {
 				BLI_addtail(&seqn->seqbase, n);
 			}
@@ -5513,19 +5508,19 @@ Sequence *BKE_sequence_dupli_recursive(const Scene *scene_src, Scene *scene_dst,
 }
 
 void BKE_sequence_base_dupli_recursive(
-        const Scene *scene_src, Scene *scene_dst, ListBase *nseqbase, const ListBase *seqbase,
-        int dupe_flag, const int flag)
+        Scene *scene, Scene *scene_to, ListBase *nseqbase, ListBase *seqbase,
+        int dupe_flag)
 {
 	Sequence *seq;
 	Sequence *seqn = NULL;
-	Sequence *last_seq = BKE_sequencer_active_get((Scene *)scene_src);
+	Sequence *last_seq = BKE_sequencer_active_get(scene);
 	/* always include meta's strips */
 	int dupe_flag_recursive = dupe_flag | SEQ_DUPE_ALL;
 
 	for (seq = seqbase->first; seq; seq = seq->next) {
 		seq->tmp = NULL;
 		if ((seq->flag & SELECT) || (dupe_flag & SEQ_DUPE_ALL)) {
-			seqn = seq_dupli(scene_src, scene_dst, seq, dupe_flag, flag);
+			seqn = seq_dupli(scene, scene_to, seq, dupe_flag);
 			if (seqn) { /*should never fail */
 				if (dupe_flag & SEQ_DUPE_CONTEXT) {
 					seq->flag &= ~SEQ_ALLSEL;
@@ -5535,13 +5530,13 @@ void BKE_sequence_base_dupli_recursive(
 				BLI_addtail(nseqbase, seqn);
 				if (seq->type == SEQ_TYPE_META) {
 					BKE_sequence_base_dupli_recursive(
-					        scene_src, scene_dst, &seqn->seqbase, &seq->seqbase,
-					        dupe_flag_recursive, flag);
+					        scene, scene_to, &seqn->seqbase, &seq->seqbase,
+					        dupe_flag_recursive);
 				}
 
 				if (dupe_flag & SEQ_DUPE_CONTEXT) {
 					if (seq == last_seq) {
-						BKE_sequencer_active_set(scene_dst, seqn);
+						BKE_sequencer_active_set(scene, seqn);
 					}
 				}
 			}

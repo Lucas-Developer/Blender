@@ -99,8 +99,6 @@ public:
 
 	void thread_run(DeviceTask *task)
 	{
-		flush_texture_buffers();
-
 		if(task->type == DeviceTask::FILM_CONVERT) {
 			film_convert(*task, task->buffer, task->rgba_byte, task->rgba_half);
 		}
@@ -115,19 +113,10 @@ public:
 			 */
 			typedef struct KernelGlobals {
 				ccl_constant KernelData *data;
-				ccl_global char *buffers[8];
-
-				typedef struct _tex_info_t {
-					uint buffer, padding;
-					uint64_t offset;
-					uint width, height, depth, options;
-				} _tex_info_t;
-
 #define KERNEL_TEX(type, ttype, name) \
-				_tex_info_t name;
+				ccl_global type *name;
 #include "kernel/kernel_textures.h"
 #undef KERNEL_TEX
-
 				SplitData split_data;
 				SplitParams split_param_data;
 			} KernelGlobals;
@@ -228,7 +217,11 @@ public:
 					            *cached_memory.ray_state,
 					            *cached_memory.rng_state);
 
-				device->set_kernel_arg_buffers(program(), &start_arg_index);
+/* TODO(sergey): Avoid map lookup here. */
+#define KERNEL_TEX(type, ttype, name) \
+				device->set_kernel_arg_mem(program(), &start_arg_index, #name);
+#include "kernel/kernel_textures.h"
+#undef KERNEL_TEX
 
 			start_arg_index +=
 				device->kernel_set_args(program(),
@@ -359,7 +352,11 @@ public:
 			                ray_state,
 			                rtile.rng_state);
 
-			device->set_kernel_arg_buffers(device->program_data_init(), &start_arg_index);
+/* TODO(sergey): Avoid map lookup here. */
+#define KERNEL_TEX(type, ttype, name) \
+	device->set_kernel_arg_mem(device->program_data_init(), &start_arg_index, #name);
+#include "kernel/kernel_textures.h"
+#undef KERNEL_TEX
 
 		start_arg_index +=
 			device->kernel_set_args(device->program_data_init(),

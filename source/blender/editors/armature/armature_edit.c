@@ -66,7 +66,7 @@
 /* ************************** Object Tools Exports ******************************* */
 /* NOTE: these functions are exported to the Object module to be called from the tools there */
 
-void ED_armature_apply_transform(Object *ob, float mat[4][4], const bool do_props)
+void ED_armature_apply_transform(Object *ob, float mat[4][4])
 {
 	bArmature *arm = ob->data;
 
@@ -74,14 +74,14 @@ void ED_armature_apply_transform(Object *ob, float mat[4][4], const bool do_prop
 	ED_armature_to_edit(arm);
 
 	/* Transform the bones */
-	ED_armature_transform_bones(arm, mat, do_props);
+	ED_armature_transform_bones(arm, mat);
 
 	/* Turn the list into an armature */
 	ED_armature_from_edit(arm);
 	ED_armature_edit_free(arm);
 }
 
-void ED_armature_transform_bones(struct bArmature *arm, float mat[4][4], const bool do_props)
+void ED_armature_transform_bones(struct bArmature *arm, float mat[4][4])
 {
 	EditBone *ebone;
 	float scale = mat4_to_scale(mat);   /* store the scale of the matrix here to use on envelopes */
@@ -106,29 +106,27 @@ void ED_armature_transform_bones(struct bArmature *arm, float mat[4][4], const b
 		/* apply the transformed roll back */
 		mat3_to_vec_roll(tmat, NULL, &ebone->roll);
 		
-		if (do_props) {
-			ebone->rad_head *= scale;
-			ebone->rad_tail *= scale;
-			ebone->dist     *= scale;
-
-			/* we could be smarter and scale by the matrix along the x & z axis */
-			ebone->xwidth   *= scale;
-			ebone->zwidth   *= scale;
-		}
+		ebone->rad_head *= scale;
+		ebone->rad_tail *= scale;
+		ebone->dist     *= scale;
+		
+		/* we could be smarter and scale by the matrix along the x & z axis */
+		ebone->xwidth   *= scale;
+		ebone->zwidth   *= scale;
 	}
 }
 
-void ED_armature_transform(struct bArmature *arm, float mat[4][4], const bool do_props)
+void ED_armature_transform(struct bArmature *arm, float mat[4][4])
 {
 	if (arm->edbo) {
-		ED_armature_transform_bones(arm, mat, do_props);
+		ED_armature_transform_bones(arm, mat);
 	}
 	else {
 		/* Put the armature into editmode */
 		ED_armature_to_edit(arm);
 
 		/* Transform the bones */
-		ED_armature_transform_bones(arm, mat, do_props);
+		ED_armature_transform_bones(arm, mat);
 
 		/* Go back to object mode*/
 		ED_armature_from_edit(arm);

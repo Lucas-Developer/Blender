@@ -184,7 +184,7 @@ void BKE_rigidbody_free_constraint(Object *ob)
  * be added to relevant groups later...
  */
 
-RigidBodyOb *BKE_rigidbody_copy_object(const Object *ob, const int UNUSED(flag))
+RigidBodyOb *BKE_rigidbody_copy_object(const Object *ob)
 {
 	RigidBodyOb *rboN = NULL;
 
@@ -204,7 +204,7 @@ RigidBodyOb *BKE_rigidbody_copy_object(const Object *ob, const int UNUSED(flag))
 	return rboN;
 }
 
-RigidBodyCon *BKE_rigidbody_copy_constraint(const Object *ob, const int UNUSED(flag))
+RigidBodyCon *BKE_rigidbody_copy_constraint(const Object *ob)
 {
 	RigidBodyCon *rbcN = NULL;
 
@@ -290,6 +290,8 @@ static rbCollisionShape *rigidbody_get_shape_trimesh_from_mesh(Object *ob)
 		/* ensure mesh validity, then grab data */
 		if (dm == NULL)
 			return NULL;
+
+		DM_ensure_looptri(dm);
 
 		mvert   = dm->getVertArray(dm);
 		totvert = dm->getNumVerts(dm);
@@ -522,6 +524,8 @@ void BKE_rigidbody_calc_volume(Object *ob, float *r_vol)
 				if (dm == NULL)
 					return;
 			
+				DM_ensure_looptri(dm);
+			
 				mvert   = dm->getVertArray(dm);
 				totvert = dm->getNumVerts(dm);
 				lt = dm->getLoopTriArray(dm);
@@ -604,6 +608,8 @@ void BKE_rigidbody_calc_center_of_mass(Object *ob, float r_center[3])
 				/* ensure mesh validity, then grab data */
 				if (dm == NULL)
 					return;
+			
+				DM_ensure_looptri(dm);
 			
 				mvert   = dm->getVertArray(dm);
 				totvert = dm->getNumVerts(dm);
@@ -939,26 +945,24 @@ RigidBodyWorld *BKE_rigidbody_create_world(Scene *scene)
 	return rbw;
 }
 
-RigidBodyWorld *BKE_rigidbody_world_copy(RigidBodyWorld *rbw, const int flag)
+RigidBodyWorld *BKE_rigidbody_world_copy(RigidBodyWorld *rbw)
 {
-	RigidBodyWorld *rbw_copy = MEM_dupallocN(rbw);
+	RigidBodyWorld *rbwn = MEM_dupallocN(rbw);
 
-	if (rbw->effector_weights) {
-		rbw_copy->effector_weights = MEM_dupallocN(rbw->effector_weights);
-	}
-	if ((flag & LIB_ID_CREATE_NO_USER_REFCOUNT) == 0) {
-		id_us_plus((ID *)rbw_copy->group);
-		id_us_plus((ID *)rbw_copy->constraints);
-	}
+	if (rbw->effector_weights)
+		rbwn->effector_weights = MEM_dupallocN(rbw->effector_weights);
+	if (rbwn->group)
+		id_us_plus(&rbwn->group->id);
+	if (rbwn->constraints)
+		id_us_plus(&rbwn->constraints->id);
 
-	/* XXX Never copy caches here? */
-	rbw_copy->pointcache = BKE_ptcache_copy_list(&rbw_copy->ptcaches, &rbw->ptcaches, flag & ~LIB_ID_COPY_CACHES);
+	rbwn->pointcache = BKE_ptcache_copy_list(&rbwn->ptcaches, &rbw->ptcaches, false);
 
-	rbw_copy->objects = NULL;
-	rbw_copy->physics_world = NULL;
-	rbw_copy->numbodies = 0;
+	rbwn->objects = NULL;
+	rbwn->physics_world = NULL;
+	rbwn->numbodies = 0;
 
-	return rbw_copy;
+	return rbwn;
 }
 
 void BKE_rigidbody_world_groups_relink(RigidBodyWorld *rbw)
@@ -1654,13 +1658,13 @@ void BKE_rigidbody_do_simulation(Scene *scene, float ctime)
 #  pragma GCC diagnostic ignored "-Wunused-parameter"
 #endif
 
-struct RigidBodyOb *BKE_rigidbody_copy_object(const Object *ob, const int flag) { return NULL; }
-struct RigidBodyCon *BKE_rigidbody_copy_constraint(const Object *ob, const int flag) { return NULL; }
+struct RigidBodyOb *BKE_rigidbody_copy_object(const Object *ob) { return NULL; }
+struct RigidBodyCon *BKE_rigidbody_copy_constraint(const Object *ob) { return NULL; }
 void BKE_rigidbody_validate_sim_world(Scene *scene, RigidBodyWorld *rbw, bool rebuild) {}
 void BKE_rigidbody_calc_volume(Object *ob, float *r_vol) { if (r_vol) *r_vol = 0.0f; }
 void BKE_rigidbody_calc_center_of_mass(Object *ob, float r_center[3]) { zero_v3(r_center); }
 struct RigidBodyWorld *BKE_rigidbody_create_world(Scene *scene) { return NULL; }
-struct RigidBodyWorld *BKE_rigidbody_world_copy(RigidBodyWorld *rbw, const int flag) { return NULL; }
+struct RigidBodyWorld *BKE_rigidbody_world_copy(RigidBodyWorld *rbw) { return NULL; }
 void BKE_rigidbody_world_groups_relink(struct RigidBodyWorld *rbw) {}
 void BKE_rigidbody_world_id_loop(struct RigidBodyWorld *rbw, RigidbodyWorldIDFunc func, void *userdata) {}
 struct RigidBodyOb *BKE_rigidbody_create_object(Scene *scene, Object *ob, short type) { return NULL; }

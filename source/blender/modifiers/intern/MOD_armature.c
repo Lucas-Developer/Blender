@@ -64,13 +64,13 @@ static void initData(ModifierData *md)
 
 static void copyData(ModifierData *md, ModifierData *target)
 {
-#if 0
 	ArmatureModifierData *amd = (ArmatureModifierData *) md;
-#endif
 	ArmatureModifierData *tamd = (ArmatureModifierData *) target;
 
-	modifier_copyData_generic(md, target);
-	tamd->prevCos = NULL;
+	tamd->object = amd->object;
+	tamd->deformflag = amd->deformflag;
+	tamd->multi = amd->multi;
+	BLI_strncpy(tamd->defgrp_name, amd->defgrp_name, sizeof(tamd->defgrp_name));
 }
 
 static CustomDataMask requiredDataMask(Object *UNUSED(ob), ModifierData *UNUSED(md))

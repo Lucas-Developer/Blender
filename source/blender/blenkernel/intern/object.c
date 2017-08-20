@@ -312,7 +312,7 @@ void BKE_object_link_modifiers(struct Object *ob_dst, const struct Object *ob_sr
 		modifier_unique_name(&ob_dst->modifiers, nmd);
 	}
 
-	BKE_object_copy_particlesystems(ob_dst, ob_src, 0);
+	BKE_object_copy_particlesystems(ob_dst, ob_src);
 
 	/* TODO: smoke?, cloth? */
 }
@@ -330,14 +330,14 @@ void BKE_object_free_derived_caches(Object *ob)
 		Mesh *me = ob->data;
 
 		if (me && me->bb) {
-			atomic_fetch_and_or_uint32((uint *)&me->bb->flag, BOUNDBOX_DIRTY);
+			atomic_fetch_and_or_uint32((uint*)&me->bb->flag, BOUNDBOX_DIRTY);
 		}
 	}
 	else if (ELEM(ob->type, OB_SURF, OB_CURVE, OB_FONT)) {
 		Curve *cu = ob->data;
 
 		if (cu && cu->bb) {
-			atomic_fetch_and_or_uint32((uint *)&cu->bb->flag, BOUNDBOX_DIRTY);
+			atomic_fetch_and_or_uint32((uint*)&cu->bb->flag, BOUNDBOX_DIRTY);
 		}
 	}
 
@@ -670,7 +670,7 @@ Object *BKE_object_add_only_object(Main *bmain, int type, const char *name)
 	if (!name)
 		name = get_obdata_defname(type);
 
-	ob = BKE_libblock_alloc(bmain, ID_OB, name, 0);
+	ob = BKE_libblock_alloc(bmain, ID_OB, name);
 
 	/* default object vars */
 	ob->type = type;
@@ -837,7 +837,7 @@ struct Object *BKE_object_lod_matob_get(Object *ob, Scene *scene)
 #endif  /* WITH_GAMEENGINE */
 
 
-SoftBody *copy_softbody(const SoftBody *sb, const int flag)
+SoftBody *copy_softbody(const SoftBody *sb, bool copy_caches)
 {
 	SoftBody *sbn;
 	
@@ -845,7 +845,7 @@ SoftBody *copy_softbody(const SoftBody *sb, const int flag)
 	
 	sbn = MEM_dupallocN(sb);
 
-	if ((flag & LIB_ID_COPY_CACHES) == 0) {
+	if (copy_caches == false) {
 		sbn->totspring = sbn->totpoint = 0;
 		sbn->bpoint = NULL;
 		sbn->bspring = NULL;
@@ -874,7 +874,7 @@ SoftBody *copy_softbody(const SoftBody *sb, const int flag)
 	
 	sbn->scratch = NULL;
 
-	sbn->pointcache = BKE_ptcache_copy_list(&sbn->ptcaches, &sb->ptcaches, flag);
+	sbn->pointcache = BKE_ptcache_copy_list(&sbn->ptcaches, &sb->ptcaches, copy_caches);
 
 	if (sb->effector_weights)
 		sbn->effector_weights = MEM_dupallocN(sb->effector_weights);
@@ -882,7 +882,7 @@ SoftBody *copy_softbody(const SoftBody *sb, const int flag)
 	return sbn;
 }
 
-BulletSoftBody *copy_bulletsoftbody(const BulletSoftBody *bsb, const int UNUSED(flag))
+BulletSoftBody *copy_bulletsoftbody(const BulletSoftBody *bsb)
 {
 	BulletSoftBody *bsbn;
 
@@ -893,7 +893,7 @@ BulletSoftBody *copy_bulletsoftbody(const BulletSoftBody *bsb, const int UNUSED(
 	return bsbn;
 }
 
-ParticleSystem *BKE_object_copy_particlesystem(ParticleSystem *psys, const int flag)
+ParticleSystem *BKE_object_copy_particlesystem(ParticleSystem *psys)
 {
 	ParticleSystem *psysn;
 	ParticleData *pa;
@@ -930,7 +930,7 @@ ParticleSystem *BKE_object_copy_particlesystem(ParticleSystem *psys, const int f
 
 	if (psys->clmd) {
 		psysn->clmd = (ClothModifierData *)modifier_new(eModifierType_Cloth);
-		modifier_copyData_ex((ModifierData *)psys->clmd, (ModifierData *)psysn->clmd, flag);
+		modifier_copyData((ModifierData *)psys->clmd, (ModifierData *)psysn->clmd);
 		psys->hair_in_dm = psys->hair_out_dm = NULL;
 	}
 
@@ -948,8 +948,7 @@ ParticleSystem *BKE_object_copy_particlesystem(ParticleSystem *psys, const int f
 	BLI_listbase_clear(&psysn->childcachebufs);
 	psysn->renderdata = NULL;
 	
-	/* XXX Never copy caches here? */
-	psysn->pointcache = BKE_ptcache_copy_list(&psysn->ptcaches, &psys->ptcaches, flag & ~LIB_ID_COPY_CACHES);
+	psysn->pointcache = BKE_ptcache_copy_list(&psysn->ptcaches, &psys->ptcaches, false);
 
 	/* XXX - from reading existing code this seems correct but intended usage of
 	 * pointcache should /w cloth should be added in 'ParticleSystem' - campbell */
@@ -957,14 +956,12 @@ ParticleSystem *BKE_object_copy_particlesystem(ParticleSystem *psys, const int f
 		psysn->clmd->point_cache = psysn->pointcache;
 	}
 
-	if ((flag & LIB_ID_CREATE_NO_USER_REFCOUNT) == 0) {
-		id_us_plus((ID *)psysn->part);
-	}
+	id_us_plus((ID *)psysn->part);
 
 	return psysn;
 }
 
-void BKE_object_copy_particlesystems(Object *ob_dst, const Object *ob_src, const int flag)
+void BKE_object_copy_particlesystems(Object *ob_dst, const Object *ob_src)
 {
 	ParticleSystem *psys, *npsys;
 	ModifierData *md;
@@ -976,7 +973,7 @@ void BKE_object_copy_particlesystems(Object *ob_dst, const Object *ob_src, const
 
 	BLI_listbase_clear(&ob_dst->particlesystem);
 	for (psys = ob_src->particlesystem.first; psys; psys = psys->next) {
-		npsys = BKE_object_copy_particlesystem(psys, flag);
+		npsys = BKE_object_copy_particlesystem(psys);
 
 		BLI_addtail(&ob_dst->particlesystem, npsys);
 
@@ -1013,25 +1010,23 @@ void BKE_object_copy_softbody(Object *ob_dst, const Object *ob_src)
 {
 	if (ob_src->soft) {
 		ob_dst->softflag = ob_src->softflag;
-		ob_dst->soft = copy_softbody(ob_src->soft, 0);
+		ob_dst->soft = copy_softbody(ob_src->soft, false);
 	}
 }
 
-static void copy_object_pose(Object *obn, const Object *ob, const int flag)
+static void copy_object_pose(Object *obn, const Object *ob)
 {
 	bPoseChannel *chan;
 	
 	/* note: need to clear obn->pose pointer first, so that BKE_pose_copy_data works (otherwise there's a crash) */
 	obn->pose = NULL;
-	BKE_pose_copy_data_ex(&obn->pose, ob->pose, flag, true);  /* true = copy constraints */
+	BKE_pose_copy_data(&obn->pose, ob->pose, 1);    /* 1 = copy constraints */
 
 	for (chan = obn->pose->chanbase.first; chan; chan = chan->next) {
 		bConstraint *con;
 		
 		chan->flag &= ~(POSE_LOC | POSE_ROT | POSE_SIZE);
 		
-		/* XXX Remapping object pointing onto itself should be handled by generic BKE_library_remap stuff, but...
-		 *     the flush_constraint_targets callback am not sure about, so will delay that for now. */
 		for (con = chan->constraints.first; con; con = con->next) {
 			const bConstraintTypeInfo *cti = BKE_constraint_typeinfo_get(con);
 			ListBase targets = {NULL, NULL};
@@ -1052,9 +1047,12 @@ static void copy_object_pose(Object *obn, const Object *ob, const int flag)
 	}
 }
 
-static void copy_object_lod(Object *obn, const Object *ob, const int UNUSED(flag))
+static void copy_object_lod(Object *obn, const Object *ob)
 {
 	BLI_duplicatelist(&obn->lodlevels, &ob->lodlevels);
+
+	if (obn->lodlevels.first)
+		((LodLevel *)obn->lodlevels.first)->source = obn;
 
 	obn->currentlod = (LodLevel *)obn->lodlevels.first;
 }
@@ -1100,99 +1098,98 @@ void BKE_object_transform_copy(Object *ob_tar, const Object *ob_src)
 	copy_v3_v3(ob_tar->size, ob_src->size);
 }
 
-/**
- * Only copy internal data of Object ID from source to already allocated/initialized destination.
- * You probably nerver want to use that directly, use id_copy or BKE_id_copy_ex for typical needs.
- *
- * WARNING! This function will not handle ID user count!
- *
- * \param flag  Copying options (see BKE_library.h's LIB_ID_COPY_... flags for more).
- */
-void BKE_object_copy_data(Main *UNUSED(bmain), Object *ob_dst, const Object *ob_src, const int flag)
+Object *BKE_object_copy_ex(Main *bmain, const Object *ob, bool copy_caches)
 {
+	Object *obn;
 	ModifierData *md;
+	int a;
 
-	/* We never handle usercount here for own data. */
-	const int flag_subdata = flag | LIB_ID_CREATE_NO_USER_REFCOUNT;
-
-	if (ob_src->totcol) {
-		ob_dst->mat = MEM_dupallocN(ob_src->mat);
-		ob_dst->matbits = MEM_dupallocN(ob_src->matbits);
-		ob_dst->totcol = ob_src->totcol;
+	obn = BKE_libblock_copy(bmain, &ob->id);
+	
+	if (ob->totcol) {
+		obn->mat = MEM_dupallocN(ob->mat);
+		obn->matbits = MEM_dupallocN(ob->matbits);
+		obn->totcol = ob->totcol;
 	}
 
-	if (ob_src->iuser) ob_dst->iuser = MEM_dupallocN(ob_src->iuser);
+	if (ob->iuser) obn->iuser = MEM_dupallocN(ob->iuser);
 	
-	if (ob_src->bb) ob_dst->bb = MEM_dupallocN(ob_src->bb);
-	ob_dst->flag &= ~OB_FROMGROUP;
+	if (ob->bb) obn->bb = MEM_dupallocN(ob->bb);
+	obn->flag &= ~OB_FROMGROUP;
 	
-	BLI_listbase_clear(&ob_dst->modifiers);
+	BLI_listbase_clear(&obn->modifiers);
 	
-	for (md = ob_src->modifiers.first; md; md = md->next) {
+	for (md = ob->modifiers.first; md; md = md->next) {
 		ModifierData *nmd = modifier_new(md->type);
 		BLI_strncpy(nmd->name, md->name, sizeof(nmd->name));
-		modifier_copyData_ex(md, nmd, flag_subdata);
-		BLI_addtail(&ob_dst->modifiers, nmd);
+		modifier_copyData(md, nmd);
+		BLI_addtail(&obn->modifiers, nmd);
 	}
 
-	BLI_listbase_clear(&ob_dst->prop);
-	BKE_bproperty_copy_list(&ob_dst->prop, &ob_src->prop);
+	BLI_listbase_clear(&obn->prop);
+	BKE_bproperty_copy_list(&obn->prop, &ob->prop);
 
-	BKE_sca_logic_copy(ob_dst, ob_src, flag_subdata);
+	BKE_sca_logic_copy(obn, ob);
 
-	if (ob_src->pose) {
-		copy_object_pose(ob_dst, ob_src, flag_subdata);
+	if (ob->pose) {
+		copy_object_pose(obn, ob);
 		/* backwards compat... non-armatures can get poses in older files? */
-		if (ob_src->type == OB_ARMATURE)
-			BKE_pose_rebuild(ob_dst, ob_dst->data);
+		if (ob->type == OB_ARMATURE)
+			BKE_pose_rebuild(obn, obn->data);
 	}
-	defgroup_copy_list(&ob_dst->defbase, &ob_src->defbase);
-	BKE_constraints_copy_ex(&ob_dst->constraints, &ob_src->constraints, flag_subdata, true);
+	defgroup_copy_list(&obn->defbase, &ob->defbase);
+	BKE_constraints_copy(&obn->constraints, &ob->constraints, true);
 
-	ob_dst->mode = OB_MODE_OBJECT;
-	ob_dst->sculpt = NULL;
+	obn->mode = OB_MODE_OBJECT;
+	obn->sculpt = NULL;
 
-	if (ob_src->pd) {
-		ob_dst->pd = MEM_dupallocN(ob_src->pd);
-		if (ob_dst->pd->rng) {
-			ob_dst->pd->rng = MEM_dupallocN(ob_src->pd->rng);
-		}
+	/* increase user numbers */
+	id_us_plus((ID *)obn->data);
+	id_us_plus((ID *)obn->poselib);
+	id_us_plus((ID *)obn->gpd);
+	id_us_plus((ID *)obn->dup_group);
+
+	for (a = 0; a < obn->totcol; a++) id_us_plus((ID *)obn->mat[a]);
+	
+	if (ob->pd) {
+		obn->pd = MEM_dupallocN(ob->pd);
+		if (obn->pd->tex)
+			id_us_plus(&(obn->pd->tex->id));
+		if (obn->pd->rng)
+			obn->pd->rng = MEM_dupallocN(ob->pd->rng);
 	}
-	ob_dst->soft = copy_softbody(ob_src->soft, flag_subdata);
-	ob_dst->bsoft = copy_bulletsoftbody(ob_src->bsoft, flag_subdata);
-	ob_dst->rigidbody_object = BKE_rigidbody_copy_object(ob_src, flag_subdata);
-	ob_dst->rigidbody_constraint = BKE_rigidbody_copy_constraint(ob_src, flag_subdata);
+	obn->soft = copy_softbody(ob->soft, copy_caches);
+	obn->bsoft = copy_bulletsoftbody(ob->bsoft);
+	obn->rigidbody_object = BKE_rigidbody_copy_object(ob);
+	obn->rigidbody_constraint = BKE_rigidbody_copy_constraint(ob);
 
-	BKE_object_copy_particlesystems(ob_dst, ob_src, flag_subdata);
+	BKE_object_copy_particlesystems(obn, ob);
 	
-	ob_dst->derivedDeform = NULL;
-	ob_dst->derivedFinal = NULL;
+	obn->derivedDeform = NULL;
+	obn->derivedFinal = NULL;
 
-	BLI_listbase_clear(&ob_dst->gpulamp);
-	BLI_listbase_clear(&ob_dst->pc_ids);
+	BLI_listbase_clear(&obn->gpulamp);
+	BLI_listbase_clear(&obn->pc_ids);
 
-	ob_dst->mpath = NULL;
+	obn->mpath = NULL;
 
-	copy_object_lod(ob_dst, ob_src, flag_subdata);
+	copy_object_lod(obn, ob);
 	
-	/* Do not copy runtime curve data. */
-	ob_dst->curve_cache = NULL;
+	/* Copy runtime surve data. */
+	obn->curve_cache = NULL;
+
+	BKE_id_copy_ensure_local(bmain, &ob->id, &obn->id);
 
 	/* Do not copy object's preview (mostly due to the fact renderers create temp copy of objects). */
-	if ((flag & LIB_ID_COPY_NO_PREVIEW) == 0 && false) {  /* XXX TODO temp hack */
-		BKE_previewimg_id_copy(&ob_dst->id, &ob_src->id);
-	}
-	else {
-		ob_dst->preview = NULL;
-	}
+	obn->preview = NULL;
+
+	return obn;
 }
 
 /* copy objects, will re-initialize cached simulation data */
 Object *BKE_object_copy(Main *bmain, const Object *ob)
 {
-	Object *ob_copy;
-	BKE_id_copy_ex(bmain, &ob->id, (ID **)&ob_copy, 0, false);
-	return ob_copy;
+	return BKE_object_copy_ex(bmain, ob, false);
 }
 
 void BKE_object_make_local_ex(Main *bmain, Object *ob, const bool lib_local, const bool clear_proxy)
@@ -1390,7 +1387,7 @@ void BKE_object_make_proxy(Object *ob, Object *target, Object *gob)
 	
 	/* type conversions */
 	if (target->type == OB_ARMATURE) {
-		copy_object_pose(ob, target, 0);   /* data copy, object pointers in constraints */
+		copy_object_pose(ob, target);   /* data copy, object pointers in constraints */
 		BKE_pose_rest(ob->pose);            /* clear all transforms in channels */
 		BKE_pose_rebuild(ob, ob->data); /* set all internal links */
 		

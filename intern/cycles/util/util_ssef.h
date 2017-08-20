@@ -22,9 +22,6 @@ CCL_NAMESPACE_BEGIN
 
 #ifdef __KERNEL_SSE2__
 
-struct sseb;
-struct ssef;
-
 /*! 4-wide SSE float type. */
 struct ssef
 {

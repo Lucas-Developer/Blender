@@ -1777,7 +1777,7 @@ compile_LLVM() {
       cd $_src
 
       # XXX Ugly patching hack!
-      patch -p1 -i "$SCRIPT_DIR/patches/install_deps_llvm.diff"
+      patch -p1 -i "$SCRIPT_DIR/install_deps_patches/llvm.patch"
 
       cd $CWD
 
@@ -1883,7 +1883,7 @@ compile_OSL() {
       git reset --hard
 
       # XXX Ugly patching hack!
-      patch -p1 -i "$SCRIPT_DIR/patches/install_deps_osl.diff"
+      patch -p1 -i "$SCRIPT_DIR/install_deps_patches/osl.patch"
     fi
 
     # Always refresh the whole build!

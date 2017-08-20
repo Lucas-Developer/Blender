@@ -25,7 +25,11 @@ __kernel void kernel_ocl_path_trace_data_init(
         int num_elements,
         ccl_global char *ray_state,
         ccl_global uint *rng_state,
-		KERNEL_BUFFER_PARAMS,
+
+#define KERNEL_TEX(type, ttype, name)                                   \
+        ccl_global type *name,
+#include "kernel/kernel_textures.h"
+
         int start_sample,
         int end_sample,
         int sx, int sy, int sw, int sh, int offset, int stride,
@@ -42,7 +46,10 @@ __kernel void kernel_ocl_path_trace_data_init(
 	                 num_elements,
 	                 ray_state,
 	                 rng_state,
-	                 KERNEL_BUFFER_ARGS,
+
+#define KERNEL_TEX(type, ttype, name) name,
+#include "kernel/kernel_textures.h"
+
 	                 start_sample,
 	                 end_sample,
 	                 sx, sy, sw, sh, offset, stride,

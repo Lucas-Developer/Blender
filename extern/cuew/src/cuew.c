@@ -184,10 +184,6 @@ tcuMipmappedArrayCreate *cuMipmappedArrayCreate;
 tcuMipmappedArrayGetLevel *cuMipmappedArrayGetLevel;
 tcuMipmappedArrayDestroy *cuMipmappedArrayDestroy;
 tcuPointerGetAttribute *cuPointerGetAttribute;
-tcuMemPrefetchAsync *cuMemPrefetchAsync;
-tcuMemAdvise *cuMemAdvise;
-tcuMemRangeGetAttribute *cuMemRangeGetAttribute;
-tcuMemRangeGetAttributes *cuMemRangeGetAttributes;
 tcuPointerSetAttribute *cuPointerSetAttribute;
 tcuPointerGetAttributes *cuPointerGetAttributes;
 tcuStreamCreate *cuStreamCreate;
@@ -206,9 +202,6 @@ tcuEventQuery *cuEventQuery;
 tcuEventSynchronize *cuEventSynchronize;
 tcuEventDestroy_v2 *cuEventDestroy_v2;
 tcuEventElapsedTime *cuEventElapsedTime;
-tcuStreamWaitValue32 *cuStreamWaitValue32;
-tcuStreamWriteValue32 *cuStreamWriteValue32;
-tcuStreamBatchMemOp *cuStreamBatchMemOp;
 tcuFuncGetAttribute *cuFuncGetAttribute;
 tcuFuncSetCacheConfig *cuFuncSetCacheConfig;
 tcuFuncSetSharedMemConfig *cuFuncSetSharedMemConfig;
@@ -238,7 +231,6 @@ tcuTexRefSetMipmapFilterMode *cuTexRefSetMipmapFilterMode;
 tcuTexRefSetMipmapLevelBias *cuTexRefSetMipmapLevelBias;
 tcuTexRefSetMipmapLevelClamp *cuTexRefSetMipmapLevelClamp;
 tcuTexRefSetMaxAnisotropy *cuTexRefSetMaxAnisotropy;
-tcuTexRefSetBorderColor *cuTexRefSetBorderColor;
 tcuTexRefSetFlags *cuTexRefSetFlags;
 tcuTexRefGetAddress_v2 *cuTexRefGetAddress_v2;
 tcuTexRefGetArray *cuTexRefGetArray;
@@ -250,7 +242,6 @@ tcuTexRefGetMipmapFilterMode *cuTexRefGetMipmapFilterMode;
 tcuTexRefGetMipmapLevelBias *cuTexRefGetMipmapLevelBias;
 tcuTexRefGetMipmapLevelClamp *cuTexRefGetMipmapLevelClamp;
 tcuTexRefGetMaxAnisotropy *cuTexRefGetMaxAnisotropy;
-tcuTexRefGetBorderColor *cuTexRefGetBorderColor;
 tcuTexRefGetFlags *cuTexRefGetFlags;
 tcuTexRefCreate *cuTexRefCreate;
 tcuTexRefDestroy *cuTexRefDestroy;
@@ -265,7 +256,6 @@ tcuSurfObjectCreate *cuSurfObjectCreate;
 tcuSurfObjectDestroy *cuSurfObjectDestroy;
 tcuSurfObjectGetResourceDesc *cuSurfObjectGetResourceDesc;
 tcuDeviceCanAccessPeer *cuDeviceCanAccessPeer;
-tcuDeviceGetP2PAttribute *cuDeviceGetP2PAttribute;
 tcuCtxEnablePeerAccess *cuCtxEnablePeerAccess;
 tcuCtxDisablePeerAccess *cuCtxDisablePeerAccess;
 tcuGraphicsUnregisterResource *cuGraphicsUnregisterResource;
@@ -299,8 +289,6 @@ tnvrtcGetPTXSize *nvrtcGetPTXSize;
 tnvrtcGetPTX *nvrtcGetPTX;
 tnvrtcGetProgramLogSize *nvrtcGetProgramLogSize;
 tnvrtcGetProgramLog *nvrtcGetProgramLog;
-tnvrtcAddNameExpression *nvrtcAddNameExpression;
-tnvrtcGetLoweredName *nvrtcGetLoweredName;
 
 
 static DynamicLibrary dynamic_library_open_find(const char **paths) {
@@ -498,10 +486,6 @@ int cuewInit(void) {
   CUDA_LIBRARY_FIND(cuMipmappedArrayGetLevel);
   CUDA_LIBRARY_FIND(cuMipmappedArrayDestroy);
   CUDA_LIBRARY_FIND(cuPointerGetAttribute);
-  CUDA_LIBRARY_FIND(cuMemPrefetchAsync);
-  CUDA_LIBRARY_FIND(cuMemAdvise);
-  CUDA_LIBRARY_FIND(cuMemRangeGetAttribute);
-  CUDA_LIBRARY_FIND(cuMemRangeGetAttributes);
   CUDA_LIBRARY_FIND(cuPointerSetAttribute);
   CUDA_LIBRARY_FIND(cuPointerGetAttributes);
   CUDA_LIBRARY_FIND(cuStreamCreate);
@@ -520,9 +504,6 @@ int cuewInit(void) {
   CUDA_LIBRARY_FIND(cuEventSynchronize);
   CUDA_LIBRARY_FIND(cuEventDestroy_v2);
   CUDA_LIBRARY_FIND(cuEventElapsedTime);
-  CUDA_LIBRARY_FIND(cuStreamWaitValue32);
-  CUDA_LIBRARY_FIND(cuStreamWriteValue32);
-  CUDA_LIBRARY_FIND(cuStreamBatchMemOp);
   CUDA_LIBRARY_FIND(cuFuncGetAttribute);
   CUDA_LIBRARY_FIND(cuFuncSetCacheConfig);
   CUDA_LIBRARY_FIND(cuFuncSetSharedMemConfig);
@@ -552,7 +533,6 @@ int cuewInit(void) {
   CUDA_LIBRARY_FIND(cuTexRefSetMipmapLevelBias);
   CUDA_LIBRARY_FIND(cuTexRefSetMipmapLevelClamp);
   CUDA_LIBRARY_FIND(cuTexRefSetMaxAnisotropy);
-  CUDA_LIBRARY_FIND(cuTexRefSetBorderColor);
   CUDA_LIBRARY_FIND(cuTexRefSetFlags);
   CUDA_LIBRARY_FIND(cuTexRefGetAddress_v2);
   CUDA_LIBRARY_FIND(cuTexRefGetArray);
@@ -564,7 +544,6 @@ int cuewInit(void) {
   CUDA_LIBRARY_FIND(cuTexRefGetMipmapLevelBias);
   CUDA_LIBRARY_FIND(cuTexRefGetMipmapLevelClamp);
   CUDA_LIBRARY_FIND(cuTexRefGetMaxAnisotropy);
-  CUDA_LIBRARY_FIND(cuTexRefGetBorderColor);
   CUDA_LIBRARY_FIND(cuTexRefGetFlags);
   CUDA_LIBRARY_FIND(cuTexRefCreate);
   CUDA_LIBRARY_FIND(cuTexRefDestroy);
@@ -579,7 +558,6 @@ int cuewInit(void) {
   CUDA_LIBRARY_FIND(cuSurfObjectDestroy);
   CUDA_LIBRARY_FIND(cuSurfObjectGetResourceDesc);
   CUDA_LIBRARY_FIND(cuDeviceCanAccessPeer);
-  CUDA_LIBRARY_FIND(cuDeviceGetP2PAttribute);
   CUDA_LIBRARY_FIND(cuCtxEnablePeerAccess);
   CUDA_LIBRARY_FIND(cuCtxDisablePeerAccess);
   CUDA_LIBRARY_FIND(cuGraphicsUnregisterResource);
@@ -615,8 +593,6 @@ int cuewInit(void) {
     NVRTC_LIBRARY_FIND(nvrtcGetPTX);
     NVRTC_LIBRARY_FIND(nvrtcGetProgramLogSize);
     NVRTC_LIBRARY_FIND(nvrtcGetProgramLog);
-    NVRTC_LIBRARY_FIND(nvrtcAddNameExpression);
-    NVRTC_LIBRARY_FIND(nvrtcGetLoweredName);
   }
 
   result = CUEW_SUCCESS;
@@ -654,7 +630,6 @@ const char *cuewErrorString(CUresult result) {
     case CUDA_ERROR_PEER_ACCESS_UNSUPPORTED: return "Peer access unsupported";
     case CUDA_ERROR_INVALID_PTX: return "Invalid ptx";
     case CUDA_ERROR_INVALID_GRAPHICS_CONTEXT: return "Invalid graphics context";
-    case CUDA_ERROR_NVLINK_UNCORRECTABLE: return "Nvlink uncorrectable";
     case CUDA_ERROR_INVALID_SOURCE: return "Invalid source";
     case CUDA_ERROR_FILE_NOT_FOUND: return "File not found";
     case CUDA_ERROR_SHARED_OBJECT_SYMBOL_NOT_FOUND: return "Link to a shared object failed to resolve";

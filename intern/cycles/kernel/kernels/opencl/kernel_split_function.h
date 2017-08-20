@@ -25,7 +25,9 @@ __kernel void KERNEL_NAME_EVAL(kernel_ocl_path_trace, KERNEL_NAME)(
 		ccl_global char *ray_state,
 		ccl_global uint *rng_state,
 
-		KERNEL_BUFFER_PARAMS,
+#define KERNEL_TEX(type, ttype, name) \
+		ccl_global type *name,
+#include "kernel/kernel_textures.h"
 
 		ccl_global int *queue_index,
 		ccl_global char *use_queues_flag,
@@ -50,9 +52,12 @@ __kernel void KERNEL_NAME_EVAL(kernel_ocl_path_trace, KERNEL_NAME)(
 
 		split_data_init(kg, &kernel_split_state, ccl_global_size(0)*ccl_global_size(1), split_data_buffer, ray_state);
 
+#define KERNEL_TEX(type, ttype, name) \
+		kg->name = name;
+#include "kernel/kernel_textures.h"
 	}
 
-	kernel_set_buffer_pointers(kg, KERNEL_BUFFER_ARGS);
+	ccl_barrier(CCL_LOCAL_MEM_FENCE);
 
 	KERNEL_NAME_EVAL(kernel, KERNEL_NAME)(
 			kg

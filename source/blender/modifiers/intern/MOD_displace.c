@@ -75,10 +75,14 @@ static void copyData(ModifierData *md, ModifierData *target)
 {
 #if 0
 	DisplaceModifierData *dmd = (DisplaceModifierData *) md;
-	DisplaceModifierData *tdmd = (DisplaceModifierData *) target;
 #endif
+	DisplaceModifierData *tdmd = (DisplaceModifierData *) target;
 
 	modifier_copyData_generic(md, target);
+
+	if (tdmd->texture) {
+		id_us_plus(&tdmd->texture->id);
+	}
 }
 
 static void freeData(ModifierData *md)

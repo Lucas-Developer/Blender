@@ -31,6 +31,7 @@ class Integrator : public Node {
 public:
 	NODE_DECLARE
 
+	int min_bounce;
 	int max_bounce;
 
 	int max_diffuse_bounce;
@@ -38,7 +39,9 @@ public:
 	int max_transmission_bounce;
 	int max_volume_bounce;
 
+	int transparent_min_bounce;
 	int transparent_max_bounce;
+	bool transparent_shadows;
 
 	int ao_bounces;
 

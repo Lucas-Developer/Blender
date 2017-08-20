@@ -220,7 +220,7 @@ struct DerivedMesh {
 	/** Recalculates mesh tessellation */
 	void (*recalcTessellation)(DerivedMesh *dm);
 
-	/** Loop tessellation cache (WARNING! Only call inside threading-protected code!) */
+	/** Loop tessellation cache */
 	void (*recalcLoopTri)(DerivedMesh *dm);
 	/** accessor functions */
 	const struct MLoopTri *(*getLoopTriArray)(DerivedMesh * dm);
@@ -625,6 +625,7 @@ void DM_ensure_normals(DerivedMesh *dm);
 void DM_ensure_tessface(DerivedMesh *dm);
 
 void DM_ensure_looptri_data(DerivedMesh *dm);
+void DM_ensure_looptri(DerivedMesh *dm);
 void DM_verttri_from_looptri(MVertTri *verttri, const MLoop *mloop, const MLoopTri *looptri, int looptri_num);
 
 void DM_update_tessface_data(DerivedMesh *dm);
@@ -831,5 +832,11 @@ struct MEdge *DM_get_edge_array(struct DerivedMesh *dm, bool *r_allocated);
 struct MLoop *DM_get_loop_array(struct DerivedMesh *dm, bool *r_allocated);
 struct MPoly *DM_get_poly_array(struct DerivedMesh *dm, bool *r_allocated);
 struct MFace *DM_get_tessface_array(struct DerivedMesh *dm, bool *r_allocated);
+const MLoopTri *DM_get_looptri_array(
+        DerivedMesh *dm,
+        const MVert *mvert,
+        const MPoly *mpoly, int mpoly_len,
+        const MLoop *mloop, int mloop_len,
+        bool *r_allocated);
 
 #endif  /* __BKE_DERIVEDMESH_H__ */

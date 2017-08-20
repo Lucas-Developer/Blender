@@ -503,7 +503,9 @@ void ShaderManager::device_update_common(Device *device,
 	KernelIntegrator *kintegrator = &dscene->data.integrator;
 	kintegrator->use_volumes = has_volumes;
 	/* TODO(sergey): De-duplicate with flags set in integrator.cpp. */
-	kintegrator->transparent_shadows = has_transparent_shadow;
+	if(scene->integrator->transparent_shadows) {
+		kintegrator->transparent_shadows = has_transparent_shadow;
+	}
 }
 
 void ShaderManager::device_free_common(Device *device, DeviceScene *dscene, Scene *scene)
