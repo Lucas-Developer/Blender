@@ -177,7 +177,7 @@ void WM_operatortype_append(void (*opfunc)(wmOperatorType *))
 
 	/* XXX All ops should have a description but for now allow them not to. */
 	RNA_def_struct_ui_text(ot->srna, ot->name, ot->description ? ot->description : UNDOCUMENTED_OPERATOR_TIP);
-	RNA_def_struct_identifier(ot->srna, ot->idname);
+	RNA_def_struct_identifier(&BLENDER_RNA, ot->srna, ot->idname);
 
 	BLI_ghash_insert(global_ops_hash, (void *)ot->idname, ot);
 }
@@ -193,7 +193,7 @@ void WM_operatortype_append_ptr(void (*opfunc)(wmOperatorType *, void *), void *
 	ot->translation_context = BLT_I18NCONTEXT_OPERATOR_DEFAULT;
 	opfunc(ot, userdata);
 	RNA_def_struct_ui_text(ot->srna, ot->name, ot->description ? ot->description : UNDOCUMENTED_OPERATOR_TIP);
-	RNA_def_struct_identifier(ot->srna, ot->idname);
+	RNA_def_struct_identifier(&BLENDER_RNA, ot->srna, ot->idname);
 
 	BLI_ghash_insert(global_ops_hash, (void *)ot->idname, ot);
 }
@@ -398,7 +398,7 @@ wmOperatorType *WM_operatortype_append_macro(const char *idname, const char *nam
 		ot->description = UNDOCUMENTED_OPERATOR_TIP;
 	
 	RNA_def_struct_ui_text(ot->srna, ot->name, ot->description);
-	RNA_def_struct_identifier(ot->srna, ot->idname);
+	RNA_def_struct_identifier(&BLENDER_RNA, ot->srna, ot->idname);
 	/* Use i18n context from ext.srna if possible (py operators). */
 	i18n_context = ot->ext.srna ? RNA_struct_translation_context(ot->ext.srna) : BLT_I18NCONTEXT_OPERATOR_DEFAULT;
 	RNA_def_struct_translation_context(ot->srna, i18n_context);
@@ -432,7 +432,7 @@ void WM_operatortype_append_macro_ptr(void (*opfunc)(wmOperatorType *, void *), 
 	opfunc(ot, userdata);
 
 	RNA_def_struct_ui_text(ot->srna, ot->name, ot->description);
-	RNA_def_struct_identifier(ot->srna, ot->idname);
+	RNA_def_struct_identifier(&BLENDER_RNA, ot->srna, ot->idname);
 
 	BLI_ghash_insert(global_ops_hash, (void *)ot->idname, ot);
 }
@@ -1810,7 +1810,7 @@ static uiBlock *wm_block_create_splash(bContext *C, ARegion *ar, void *UNUSED(ar
 	/* label for 'a' bugfix releases, or 'Release Candidate 1'...
 	 *  avoids recreating splash for version updates */
 	if (STREQ(STRINGIFY(BLENDER_VERSION_CYCLE), "rc")) {
-		version_suffix = "Release Candidate 2";
+		version_suffix = "Release Candidate";
 	}
 	else if (STREQ(STRINGIFY(BLENDER_VERSION_CYCLE), "release")) {
 		version_suffix = STRINGIFY(BLENDER_VERSION_CHAR);
