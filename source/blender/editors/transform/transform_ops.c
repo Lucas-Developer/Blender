@@ -81,6 +81,7 @@ static const char OP_VERT_SLIDE[] = "TRANSFORM_OT_vert_slide";
 static const char OP_EDGE_CREASE[] = "TRANSFORM_OT_edge_crease";
 static const char OP_EDGE_BWEIGHT[] = "TRANSFORM_OT_edge_bevelweight";
 static const char OP_SEQ_SLIDE[] = "TRANSFORM_OT_seq_slide";
+static const char OP_NORMAL_ROTATION[] = "TRANSFORM_OT_rotate_normal";
 
 static void TRANSFORM_OT_translate(struct wmOperatorType *ot);
 static void TRANSFORM_OT_rotate(struct wmOperatorType *ot);
@@ -99,6 +100,7 @@ static void TRANSFORM_OT_vert_slide(struct wmOperatorType *ot);
 static void TRANSFORM_OT_edge_crease(struct wmOperatorType *ot);
 static void TRANSFORM_OT_edge_bevelweight(struct wmOperatorType *ot);
 static void TRANSFORM_OT_seq_slide(struct wmOperatorType *ot);
+static void TRANSFORM_OT_rotate_normal(struct wmOperatorType *ot);
 
 static TransformModeItem transform_modes[] =
 {
@@ -119,6 +121,7 @@ static TransformModeItem transform_modes[] =
 	{OP_EDGE_CREASE, TFM_CREASE, TRANSFORM_OT_edge_crease},
 	{OP_EDGE_BWEIGHT, TFM_BWEIGHT, TRANSFORM_OT_edge_bevelweight},
 	{OP_SEQ_SLIDE, TFM_SEQ_SLIDE, TRANSFORM_OT_seq_slide},
+	{OP_NORMAL_ROTATION, TFM_NORMAL_ROTATION, TRANSFORM_OT_rotate_normal},
 	{NULL, 0}
 };
 
@@ -581,6 +584,11 @@ void Transform_Properties(struct wmOperatorType *ot, int flags)
 		prop = RNA_def_boolean(ot->srna, "use_accurate", 0, "Accurate", "Use accurate transformation");
 		RNA_def_property_flag(prop, PROP_HIDDEN);
 	}
+
+	if (flags & P_CLNOR_INVALIDATE) {
+		prop = RNA_def_boolean(ot->srna, "preserve_clnor", 0, "Keep custom normal", "Keep custom normal during transform");
+		RNA_def_property_flag(prop, PROP_HIDDEN);
+	}
 }
 
 static void TRANSFORM_OT_translate(struct wmOperatorType *ot)
@@ -600,7 +608,7 @@ static void TRANSFORM_OT_translate(struct wmOperatorType *ot)
 
 	RNA_def_float_vector_xyz(ot->srna, "value", 3, NULL, -FLT_MAX, FLT_MAX, "Vector", "", -FLT_MAX, FLT_MAX);
 
-	Transform_Properties(ot, P_CONSTRAINT | P_PROPORTIONAL | P_MIRROR | P_ALIGN_SNAP | P_OPTIONS | P_GPENCIL_EDIT);
+	Transform_Properties(ot, P_CONSTRAINT | P_PROPORTIONAL | P_MIRROR | P_ALIGN_SNAP | P_OPTIONS | P_GPENCIL_EDIT | P_CLNOR_INVALIDATE);
 }
 
 static void TRANSFORM_OT_resize(struct wmOperatorType *ot)
@@ -621,8 +629,7 @@ static void TRANSFORM_OT_resize(struct wmOperatorType *ot)
 	RNA_def_float_vector(ot->srna, "value", 3, VecOne, -FLT_MAX, FLT_MAX, "Vector", "", -FLT_MAX, FLT_MAX);
 
 	Transform_Properties(
-	        ot, P_CONSTRAINT | P_PROPORTIONAL | P_MIRROR | P_GEO_SNAP | P_OPTIONS | P_GPENCIL_EDIT | P_CENTER);
-}
+	        ot, P_CONSTRAINT | P_PROPORTIONAL | P_MIRROR | P_GEO_SNAP | P_OPTIONS | P_GPENCIL_EDIT | P_CENTER | P_CLNOR_INVALIDATE);}
 
 static int skin_resize_poll(bContext *C)
 {
@@ -672,8 +679,7 @@ static void TRANSFORM_OT_trackball(struct wmOperatorType *ot)
 	/* Maybe we could use float_vector_xyz here too? */
 	RNA_def_float_rotation(ot->srna, "value", 2, NULL, -FLT_MAX, FLT_MAX, "Angle", "", -FLT_MAX, FLT_MAX);
 
-	Transform_Properties(ot, P_PROPORTIONAL | P_MIRROR | P_SNAP | P_GPENCIL_EDIT | P_CENTER);
-}
+	Transform_Properties(ot, P_PROPORTIONAL | P_MIRROR | P_SNAP | P_GPENCIL_EDIT | P_CENTER | P_CLNOR_INVALIDATE);}
 
 static void TRANSFORM_OT_rotate(struct wmOperatorType *ot)
 {
@@ -693,8 +699,7 @@ static void TRANSFORM_OT_rotate(struct wmOperatorType *ot)
 	RNA_def_float_rotation(ot->srna, "value", 0, NULL, -FLT_MAX, FLT_MAX, "Angle", "", -M_PI * 2, M_PI * 2);
 
 	Transform_Properties(
-	        ot, P_AXIS | P_CONSTRAINT | P_PROPORTIONAL | P_MIRROR | P_GEO_SNAP | P_GPENCIL_EDIT | P_CENTER);
-}
+	        ot, P_AXIS | P_CONSTRAINT | P_PROPORTIONAL | P_MIRROR | P_GEO_SNAP | P_GPENCIL_EDIT | P_CENTER | P_CLNOR_INVALIDATE);}
 
 static void TRANSFORM_OT_tilt(struct wmOperatorType *ot)
 {
@@ -736,8 +741,7 @@ static void TRANSFORM_OT_bend(struct wmOperatorType *ot)
 
 	RNA_def_float_rotation(ot->srna, "value", 1, NULL, -FLT_MAX, FLT_MAX, "Angle", "", -M_PI * 2, M_PI * 2);
 
-	Transform_Properties(ot, P_PROPORTIONAL | P_MIRROR | P_SNAP | P_GPENCIL_EDIT | P_CENTER);
-}
+	Transform_Properties(ot, P_PROPORTIONAL | P_MIRROR | P_SNAP | P_GPENCIL_EDIT | P_CENTER | P_CLNOR_INVALIDATE);}
 
 static void TRANSFORM_OT_shear(struct wmOperatorType *ot)
 {
@@ -756,7 +760,7 @@ static void TRANSFORM_OT_shear(struct wmOperatorType *ot)
 
 	RNA_def_float(ot->srna, "value", 0, -FLT_MAX, FLT_MAX, "Offset", "", -FLT_MAX, FLT_MAX);
 
-	Transform_Properties(ot, P_PROPORTIONAL | P_MIRROR | P_SNAP | P_GPENCIL_EDIT);
+	Transform_Properties(ot, P_PROPORTIONAL | P_MIRROR | P_SNAP | P_GPENCIL_EDIT | P_CLNOR_INVALIDATE);
 	// XXX Shear axis?
 }
 
@@ -777,8 +781,7 @@ static void TRANSFORM_OT_push_pull(struct wmOperatorType *ot)
 
 	RNA_def_float(ot->srna, "value", 0, -FLT_MAX, FLT_MAX, "Distance", "", -FLT_MAX, FLT_MAX);
 
-	Transform_Properties(ot, P_PROPORTIONAL | P_MIRROR | P_SNAP | P_CENTER);
-}
+	Transform_Properties(ot, P_PROPORTIONAL | P_MIRROR | P_SNAP | P_CENTER | P_CLNOR_INVALIDATE);}
 
 static void TRANSFORM_OT_shrink_fatten(struct wmOperatorType *ot)
 {
@@ -799,7 +802,7 @@ static void TRANSFORM_OT_shrink_fatten(struct wmOperatorType *ot)
 
 	RNA_def_boolean(ot->srna, "use_even_offset", true, "Offset Even", "Scale the offset to give more even thickness");
 
-	Transform_Properties(ot, P_PROPORTIONAL | P_MIRROR | P_SNAP);
+	Transform_Properties(ot, P_PROPORTIONAL | P_MIRROR | P_SNAP | P_CLNOR_INVALIDATE);
 }
 
 static void TRANSFORM_OT_tosphere(struct wmOperatorType *ot)
@@ -820,8 +823,7 @@ static void TRANSFORM_OT_tosphere(struct wmOperatorType *ot)
 
 	RNA_def_float_factor(ot->srna, "value", 0, 0, 1, "Factor", "", 0, 1);
 
-	Transform_Properties(ot, P_PROPORTIONAL | P_MIRROR | P_SNAP | P_GPENCIL_EDIT | P_CENTER);
-}
+	Transform_Properties(ot, P_PROPORTIONAL | P_MIRROR | P_SNAP | P_GPENCIL_EDIT | P_CENTER | P_CLNOR_INVALIDATE);}
 
 static void TRANSFORM_OT_mirror(struct wmOperatorType *ot)
 {
@@ -838,8 +840,7 @@ static void TRANSFORM_OT_mirror(struct wmOperatorType *ot)
 	ot->cancel = transform_cancel;
 	ot->poll   = ED_operator_screenactive;
 
-	Transform_Properties(ot, P_CONSTRAINT | P_PROPORTIONAL | P_GPENCIL_EDIT | P_CENTER);
-}
+	Transform_Properties(ot, P_CONSTRAINT | P_PROPORTIONAL | P_GPENCIL_EDIT | P_CENTER | P_CLNOR_INVALIDATE);}
 
 static void TRANSFORM_OT_edge_slide(struct wmOperatorType *ot)
 {
@@ -869,7 +870,7 @@ static void TRANSFORM_OT_edge_slide(struct wmOperatorType *ot)
 	RNA_def_boolean(ot->srna, "use_clamp", true, "Clamp",
 	                "Clamp within the edge extents");
 
-	Transform_Properties(ot, P_MIRROR | P_SNAP | P_CORRECT_UV);
+	Transform_Properties(ot, P_MIRROR | P_SNAP | P_CORRECT_UV | P_CLNOR_INVALIDATE);
 }
 
 static void TRANSFORM_OT_vert_slide(struct wmOperatorType *ot)
@@ -895,7 +896,7 @@ static void TRANSFORM_OT_vert_slide(struct wmOperatorType *ot)
 	RNA_def_boolean(ot->srna, "use_clamp", true, "Clamp",
 	                "Clamp within the edge extents");
 
-	Transform_Properties(ot, P_MIRROR | P_SNAP | P_CORRECT_UV);
+	Transform_Properties(ot, P_MIRROR | P_SNAP | P_CORRECT_UV | P_CLNOR_INVALIDATE);
 }
 
 static void TRANSFORM_OT_edge_crease(struct wmOperatorType *ot)
@@ -977,6 +978,26 @@ static void TRANSFORM_OT_seq_slide(struct wmOperatorType *ot)
 	RNA_def_float_vector_xyz(ot->srna, "value", 2, NULL, -FLT_MAX, FLT_MAX, "Vector", "", -FLT_MAX, FLT_MAX);
 
 	Transform_Properties(ot, P_SNAP);
+}
+
+static void TRANSFORM_OT_rotate_normal(struct wmOperatorType *ot)
+{
+	/* identifiers */
+	ot->name = "Normal Rotate";
+	ot->description = "Rotate split normal of selected item(s)";
+	ot->idname = OP_NORMAL_ROTATION;
+	ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO | OPTYPE_BLOCKING;
+
+	/* api callbacks */
+	ot->invoke = transform_invoke;
+	ot->exec = transform_exec;
+	ot->modal = transform_modal;
+	ot->cancel = transform_cancel;
+	ot->poll = ED_operator_editmesh_auto_smooth;
+
+	RNA_def_float_rotation(ot->srna, "value", 0, NULL, -FLT_MAX, FLT_MAX, "Angle", "", -M_PI * 2, M_PI * 2);
+
+	Transform_Properties(ot, P_AXIS | P_CONSTRAINT | P_MIRROR);
 }
 
 static void TRANSFORM_OT_transform(struct wmOperatorType *ot)

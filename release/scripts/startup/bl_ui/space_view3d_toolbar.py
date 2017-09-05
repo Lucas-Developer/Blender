@@ -432,7 +432,56 @@ class VIEW3D_PT_tools_shading(View3DPanel, Panel):
         col.label(text="Normals:")
         col.operator("mesh.normals_make_consistent", text="Recalculate")
         col.operator("mesh.flip_normals", text="Flip Direction")
-        col.operator("mesh.set_normals_from_faces", text="Set From Faces")
+
+
+class VIEW3D_PT_tools_normal(View3DPanel, Panel):
+	bl_category = "Shading / UVs"
+	bl_context = "mesh_edit"
+	bl_label = "Normal Tools"
+
+	def draw(self, context):
+		layout = self.layout
+		toolsettings = context.tool_settings
+
+		col = layout.column(align=True)
+		col.operator("mesh.set_normals_from_faces", text="Set From Faces")
+		col.operator("transform.rotate_normal", text = "Rotate Normal")
+		col.operator("mesh.point_normals")
+
+		col = layout.column(align=True)
+		col.label(text="Split/Merge: ")
+
+		col.operator("mesh.merge_loop_normals", text = "Merge Normals")
+		col.operator("mesh.split_loop_normals", text = "Split Normals")
+		
+		col = layout.column(align=True)
+		col.label(text="Average by: ")
+		
+		col.operator_menu_enum("mesh.average_loop_normals", "average_type")
+		
+		col = layout.column(align=True)
+		col.label(text="Normal Vector: ")
+		col.operator("mesh.custom_normal_tools", text="Reset").mode = "Reset"
+		col.prop(toolsettings, "normal_vector", text = '')
+
+		row = col.row(align=True)
+		row.operator("mesh.custom_normal_tools", text="Copy").mode = "Copy"
+		row.operator("mesh.custom_normal_tools", text="Paste").mode = "Paste"
+
+		row = col.row(align=True)
+		row.operator("mesh.custom_normal_tools", text = "Multiply").mode = "Multiply"
+		row.operator("mesh.custom_normal_tools", text="Add").mode = "Add"
+
+		col = layout.column(align=True)
+		col.operator("mesh.smoothen_custom_normals", text="Smoothen")
+
+		col = layout.column(align=True)
+		col.label(text="Face Strength")
+		row = col.row(align=True)
+		
+		row.prop(toolsettings, "face_strength", text="")
+		row.operator("mesh.mod_weighted_strength", text="", icon = "FACESEL").set=False
+		row.operator("mesh.mod_weighted_strength", text="", icon = "ZOOMIN").set=True	
 
 
 class VIEW3D_PT_tools_uvs(View3DPanel, Panel):
@@ -2024,6 +2073,7 @@ classes = (
     VIEW3D_PT_tools_meshweight,
     VIEW3D_PT_tools_add_mesh_edit,
     VIEW3D_PT_tools_shading,
+	VIEW3D_PT_tools_normal,
     VIEW3D_PT_tools_uvs,
     VIEW3D_PT_tools_meshedit_options,
     VIEW3D_PT_tools_transform_curve,
