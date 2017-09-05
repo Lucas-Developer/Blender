@@ -49,11 +49,9 @@ ccl_device_forceinline bool shadow_handle_transparent_isect(
 		path_state_modify_bounce(state, true);
 		shader_eval_surface(kg,
 		                    shadow_sd,
-		                    NULL,
 		                    state,
 		                    0.0f,
-		                    PATH_RAY_SHADOW,
-		                    SHADER_CONTEXT_SHADOW);
+		                    PATH_RAY_SHADOW);
 		path_state_modify_bounce(state, false);
 		*throughput *= shader_bsdf_transparency(kg, shadow_sd);
 	}
@@ -206,7 +204,7 @@ ccl_device bool shadow_blocked_transparent_all_loop(KernelGlobals *kg,
 	}
 #    ifdef __VOLUME__
 	if(!blocked && state->volume_stack[0].shader != SHADER_NONE) {
-		/* Apply attenuation from current volume shader/ */
+		/* Apply attenuation from current volume shader. */
 		kernel_volume_shadow(kg, shadow_sd, state, ray, shadow);
 	}
 #    endif

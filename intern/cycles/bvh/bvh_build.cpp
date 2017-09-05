@@ -529,7 +529,9 @@ BVHNode* BVHBuild::run()
 			        << "  Allocation slop factor: "
 			               << ((prim_type.capacity() != 0)
 			                       ? (float)prim_type.size() / prim_type.capacity()
-			                       : 1.0f) << "\n";
+			                       : 1.0f) << "\n"
+			        << "  Maximum depth: "
+			        << string_human_readable_number(rootnode->getSubtreeSize(BVH_STAT_DEPTH))  << "\n";
 		}
 	}
 
@@ -671,7 +673,7 @@ BVHNode* BVHBuild::build_node(const BVHObjectBinning& range, int level)
 				return create_leaf_node(range, references);
 			}
 		}
-		/* Check whether unaligned split is better than the regulat one. */
+		/* Check whether unaligned split is better than the regular one. */
 		if(unalignedSplitSAH < splitSAH) {
 			do_unalinged_split = true;
 		}

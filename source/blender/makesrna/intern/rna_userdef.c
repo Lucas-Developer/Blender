@@ -638,10 +638,8 @@ static StructRNA *rna_AddonPref_register(Main *bmain, ReportList *reports, void 
 
 	/* check if we have registered this header type before, and remove it */
 	apt = BKE_addon_pref_type_find(dummyaddon.module, true);
-	if (apt) {
-		if (apt->ext.srna) {
-			rna_AddonPref_unregister(bmain, apt->ext.srna);
-		}
+	if (apt && apt->ext.srna) {
+		rna_AddonPref_unregister(bmain, apt->ext.srna);
 	}
 
 	/* create a new header type */
