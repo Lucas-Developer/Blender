@@ -41,11 +41,16 @@
 #include "DNA_object_types.h"
 #include "DNA_scene_types.h"
 
+#include "BLI_bitmap.h"
+#include "BLI_heap.h"
 #include "BLI_listbase.h"
+#include "BLI_linklist.h"
+#include "BLI_linklist_stack.h"
 #include "BLI_noise.h"
 #include "BLI_math.h"
 #include "BLI_rand.h"
 #include "BLI_sort_utils.h"
+#include "BLI_string.h"
 
 #include "BKE_material.h"
 #include "BKE_context.h"
@@ -54,6 +59,7 @@
 #include "BKE_report.h"
 #include "BKE_texture.h"
 #include "BKE_main.h"
+#include "BKE_mesh.h"
 #include "BKE_editmesh.h"
 
 #include "BLT_translation.h"
@@ -5977,3 +5983,1187 @@ void MESH_OT_mark_freestyle_face(wmOperatorType *ot)
 }
 
 #endif
+
+/* Initialize loop normal data */
+static int init_point_normals(bContext *C, wmOperator *op, const wmEvent *event)
+{
+	Object *obedit = CTX_data_edit_object(C);
+	BMesh *bm = BKE_editmesh_from_object(obedit)->bm;
+
+	BM_lnorspace_update(bm);
+	LoopNormalData *ld = BM_loop_normal_init(bm);
+
+	ld->funcdata = NULL;
+	op->customdata = ld;
+
+	return ld->totloop;
+}
+
+static void apply_point_normals(bContext *C, wmOperator *op, const wmEvent *event, float target[3])
+{
+	Object *obedit = CTX_data_edit_object(C);
+	BMesh *bm = BKE_editmesh_from_object(obedit)->bm;
+	LoopNormalData *ld = op->customdata;
+	TransDataLoopNormal *tld = ld->normal;
+
+	const bool point_away = RNA_boolean_get(op->ptr, "point_away"), spherize = RNA_boolean_get(op->ptr, "spherize");
+	float zero[3] = { 0 };
+
+	PropertyRNA *prop = RNA_struct_find_property(op->ptr, "strength");
+	if (spherize) {
+		RNA_def_property_clear_flag(prop, PROP_HIDDEN);
+	}
+	else {
+		RNA_def_property_flag(prop, PROP_HIDDEN);
+	}
+
+	for (int i = 0; i < ld->totloop; i++, tld++) {
+
+		if (spherize) {
+			float strength = RNA_float_get(op->ptr, "strength");
+			float spherized_normal[3] = { 0 };
+
+			sub_v3_v3v3(spherized_normal, target, tld->loc);
+			sub_v3_v3(spherized_normal, obedit->loc);
+			mul_v3_fl(spherized_normal, strength);
+			mul_v3_fl(tld->nloc, 1.0f - strength);
+			sub_v3_v3(tld->nloc, spherized_normal);
+		}
+		else {
+			sub_v3_v3v3(tld->nloc, target, tld->loc);
+			sub_v3_v3(tld->nloc, obedit->loc);
+		}
+
+		if (point_away) {
+			negate_v3(tld->nloc);
+		}
+		if (tld->loop_index != -1 && !compare_v3v3(tld->nloc, zero, 1e-4f)) {
+			normalize_v3(tld->nloc);
+			BKE_lnor_space_custom_normal_to_data(bm->lnor_spacearr->lspacearr[tld->loop_index], tld->nloc, tld->clnors_data);
+		}
+	}
+}
+
+static void point_normals_free(bContext *C, wmOperator *op, const bool align)
+{
+	LoopNormalData *ld = op->customdata;
+	if (align) {
+		MEM_freeN(ld->normal->loc);
+	}
+	MEM_freeN(ld->normal);
+	MEM_freeN(ld);
+	op->customdata = NULL;
+
+	ED_area_headerprint(CTX_wm_area(C), NULL);
+}
+
+static int point_normals_mouse(bContext *C, wmOperator *op, const wmEvent *event)
+{
+	View3D *v3d = CTX_wm_view3d(C);
+	Object *obedit = CTX_data_edit_object(C);
+	ARegion *ar = CTX_wm_region(C);
+	BMEditMesh *em = BKE_editmesh_from_object(obedit);
+	BMesh *bm = em->bm;
+	BMVert *v;
+	BMIter viter;
+	int i = 0;
+
+	float target[3], center[3];
+
+	RNA_float_get_array(op->ptr, "target_location", target);
+
+	zero_v3(center);
+	BM_ITER_MESH(v, &viter, bm, BM_VERTS_OF_MESH) {
+		if (BM_elem_flag_test(v, BM_ELEM_SELECT)) {
+			add_v3_v3(center, v->co);
+			add_v3_v3(center, obedit->loc);
+			i++;
+		}
+	}
+	mul_v3_fl(center, 1.0f / (float)i);
+
+	ED_view3d_win_to_3d_int(v3d, ar, center, event->mval, target);
+
+	const bool align = RNA_boolean_get(op->ptr, "align");
+
+	apply_point_normals(C, op, event, target);
+	EDBM_update_generic(em, true, false);
+
+	if (event->type == LEFTMOUSE) {
+		RNA_float_set_array(op->ptr, "target_location", target);
+		point_normals_free(C, op, align);
+		return OPERATOR_FINISHED;
+	}
+
+	else if ((ISKEYBOARD(event->type) || event->type == RIGHTMOUSE) && event->type != MKEY) {
+		LoopNormalData *ld = op->customdata;
+		TransDataLoopNormal *tld = ld->normal;
+
+		for (i = 0; i < ld->totloop; i++, tld++) {				/* Reset custom normal data */
+			BKE_lnor_space_custom_normal_to_data(bm->lnor_spacearr->lspacearr[tld->loop_index], tld->niloc, tld->clnors_data);
+		}
+		point_normals_free(C, op, align);
+		return OPERATOR_CANCELLED;
+	}
+	return OPERATOR_PASS_THROUGH;
+}
+
+static int edbm_point_normals_modal(bContext *C, wmOperator *op, const wmEvent *event)
+{
+	View3D *v3d = CTX_wm_view3d(C);
+	Scene *scene = CTX_data_scene(C);
+	Object *obedit = CTX_data_edit_object(C);
+	BMEditMesh *em = BKE_editmesh_from_object(obedit);
+	BMesh *bm = em->bm;
+	float target[3];
+	int i = 0;
+
+	bool handled = false;
+	PropertyRNA *prop = RNA_struct_find_property(op->ptr, "target_location");
+	LoopNormalData *ld = op->customdata;
+
+	if (ld->funcdata) {				/* executes and transfers control to point_normals_mouse */
+		int(*apply)(bContext *, wmOperator *, const wmEvent *);
+		apply = ld->funcdata;
+		return apply(C, op, event);
+	}
+
+	if (event->val == KM_PRESS) {
+		BMVert *v;
+		BMIter viter;
+		
+		if (event->type == LEFTMOUSE) {
+			ED_view3d_cursor3d_update(C, event->mval);
+			copy_v3_v3(target, ED_view3d_cursor3d_get(scene, v3d));
+			RNA_property_float_set_array(op->ptr, prop, target);
+
+			handled = true;
+		}
+		if (event->type == RIGHTMOUSE) {
+
+			view3d_operator_needs_opengl(C);
+			bool retval = EDBM_select_pick(C, event->mval, false, false, false);
+			if (!retval) {
+				point_normals_free(C, op, false);
+				return OPERATOR_CANCELLED;
+			}
+			ED_object_editmode_calc_active_center(obedit, false, target);
+			add_v3_v3(target, obedit->loc);
+			RNA_property_float_set_array(op->ptr, prop, target);
+			handled = true;
+		}
+		else if (event->type == LKEY) {
+
+			switch (v3d->around) {
+			case V3D_AROUND_CENTER_BOUNDS:
+				/* calculateCenterBound */
+			{
+				float min[3], max[3];
+				BM_ITER_MESH(v, &viter, bm, BM_VERTS_OF_MESH) {
+					if (BM_elem_flag_test(v, BM_ELEM_SELECT)) {
+						if (i) {
+							minmax_v3v3_v3(min, max, v->co);
+						}
+						else {
+							copy_v3_v3(min, v->co);
+							copy_v3_v3(max, v->co);
+						}
+						i++;
+					}
+				}
+				mid_v3_v3v3(target, min, max);
+				add_v3_v3(target, obedit->loc);
+				RNA_property_float_set_array(op->ptr, prop, target);
+			}
+			break;
+
+			case V3D_AROUND_CENTER_MEAN:
+				zero_v3(target);
+				
+				BM_ITER_MESH(v, &viter, bm, BM_VERTS_OF_MESH) {
+					if (BM_elem_flag_test(v, BM_ELEM_SELECT)) {
+						add_v3_v3(target, v->co);
+						add_v3_v3(target, obedit->loc);
+						i++;
+					}
+				}
+				mul_v3_fl(target, 1.0f / (float)i);
+				RNA_property_float_set_array(op->ptr, prop, target);
+				break;
+
+			case V3D_AROUND_CURSOR:
+				copy_v3_v3(target, ED_view3d_cursor3d_get(scene, v3d));
+				RNA_property_float_set_array(op->ptr, prop, target);
+				break;
+
+			case V3D_AROUND_ACTIVE:
+				if (!ED_object_editmode_calc_active_center(obedit, false, target)) {
+					point_normals_free(C, op, false);
+					return OPERATOR_CANCELLED;
+				}
+				add_v3_v3(target, obedit->loc);
+				RNA_property_float_set_array(op->ptr, prop, target);
+				break;
+
+			default:
+				BKE_report(op->reports, RPT_ERROR, "Does not support Indivisual Origin as pivot");
+				point_normals_free(C, op, false);
+				return OPERATOR_CANCELLED;
+			}
+			handled = true;
+		}
+		else if (event->type == MKEY) {
+			ld->funcdata = point_normals_mouse;
+
+			const bool align = RNA_boolean_get(op->ptr, "align");
+
+			if (align) {								/* Set TransData loc to center loc if align true */
+				float *center = MEM_mallocN(sizeof(*center) * 3, "__func__");
+				TransDataLoopNormal *t = ld->normal;
+				int i = 0;
+
+				zero_v3(center);
+				BM_ITER_MESH(v, &viter, bm, BM_VERTS_OF_MESH) {
+					if (BM_elem_flag_test(v, BM_ELEM_SELECT)) {
+						add_v3_v3(center, v->co);
+						i++;
+					}
+				}
+				mul_v3_fl(center, 1.0f / (float)i);
+
+				for (i = 0; i < ld->totloop; i++, t++) {
+					t->loc = center;
+				}
+			}
+
+			char header[UI_MAX_DRAW_STR];
+			BLI_snprintf(header, sizeof(header), IFACE_("Left Click to Confirm. Right click to Cancel."));
+
+			ED_area_headerprint(CTX_wm_area(C), header);
+		}
+		else if (event->type == OKEY) {
+			copy_v3_v3(target, obedit->loc);
+			RNA_property_float_set_array(op->ptr, prop, target);
+			handled = true;
+		}
+		else if (ISKEYBOARD(event->type) && event->type != RIGHTALTKEY) {
+			prop = RNA_struct_find_property(op->ptr, "align");
+			RNA_property_boolean_set(op->ptr, prop, false);
+
+			point_normals_free(C, op, false);
+			return OPERATOR_CANCELLED;
+		}
+	}
+	
+	if (handled || event->type == RIGHTMOUSE) {
+		prop = RNA_struct_find_property(op->ptr, "align");
+		RNA_property_boolean_set(op->ptr, prop, false);
+	}
+
+	if (handled) {
+		apply_point_normals(C, op, event, target);
+
+		EDBM_update_generic(em, true, false);	/* Recheck bools */
+		point_normals_free(C, op, false);
+
+		return OPERATOR_FINISHED;
+	}
+
+	return OPERATOR_PASS_THROUGH;
+}
+
+static int edbm_point_normals_invoke(bContext *C, wmOperator *op, const wmEvent *event)
+{
+	Object *obedit = CTX_data_edit_object(C);
+	BMesh *bm = BKE_editmesh_from_object(obedit)->bm;
+
+	if (!init_point_normals(C, op, event)) {
+		point_normals_free(C, op, false);
+		return OPERATOR_CANCELLED;
+	}
+
+	WM_event_add_modal_handler(C, op);
+
+	char header[UI_MAX_DRAW_STR];
+	BLI_snprintf(header, sizeof(header), IFACE_("L Key to use Pivot as target, M Key to point to mouse, O Key to point to object origin, "
+		"Left Click to point to new cursor location, Right Click on mesh to point to mesh"));
+
+	ED_area_headerprint(CTX_wm_area(C), header);
+
+	op->flag |= OP_IS_MODAL_GRAB_CURSOR;
+	return OPERATOR_RUNNING_MODAL;
+}
+
+static int edbm_point_normals_exec(bContext *C, wmOperator *op)
+{
+	Object *obedit = CTX_data_edit_object(C);
+	BMEditMesh *em = BKE_editmesh_from_object(obedit);
+	BMesh *bm = em->bm;
+
+	PropertyRNA *prop;
+
+	if (!init_point_normals(C, op, NULL)) {
+		point_normals_free(C, op, false);
+		return OPERATOR_CANCELLED;
+	}
+	float target[3];
+
+	bool point_away = RNA_boolean_get(op->ptr, "point_away"), align = RNA_boolean_get(op->ptr, "align");
+
+	if (align) {								/* Set TransData loc to center loc if align true */
+		float *center = MEM_mallocN(sizeof(*center) * 3, "__func__");
+		LoopNormalData *ld = op->customdata;
+		TransDataLoopNormal *t = ld->normal;
+		int i = 0;
+		BMVert *v;
+		BMIter viter;
+
+		zero_v3(center);
+		BM_ITER_MESH(v, &viter, bm, BM_VERTS_OF_MESH) {
+			if (BM_elem_flag_test(v, BM_ELEM_SELECT)) {
+				add_v3_v3(center, v->co);
+				i++;
+			}
+		}
+		mul_v3_fl(center, 1.0f / (float)i);
+
+		for (i = 0; i < ld->totloop; i++, t++) {
+			t->loc = center;
+		}
+	}
+
+	prop = RNA_struct_find_property(op->ptr, "target_location");
+	RNA_property_float_get_array(op->ptr, prop, target);
+	apply_point_normals(C, op, NULL, target);
+
+	EDBM_update_generic(em, true, false);
+	point_normals_free(C, op, align);
+
+	return OPERATOR_FINISHED;
+}
+
+void MESH_OT_point_normals(struct wmOperatorType *ot)
+{
+	/* identifiers */
+	ot->name = "Point normals to Target";
+	ot->description = "Point selected normals to specified Target";
+	ot->idname = "MESH_OT_point_normals";
+
+	/* api callbacks */
+	ot->exec = edbm_point_normals_exec;
+	ot->invoke = edbm_point_normals_invoke;
+	ot->modal = edbm_point_normals_modal;
+	ot->poll = ED_operator_editmesh_auto_smooth;
+
+	/* flags */
+	ot->flag = OPTYPE_BLOCKING | OPTYPE_REGISTER | OPTYPE_UNDO;
+
+	ot->prop = RNA_def_boolean(ot->srna, "point_away", false, "Point Away", "Point Away from target");
+	
+	ot->prop = RNA_def_boolean(ot->srna, "align", false, "Align", "Align normal with mouse location");
+
+	PropertyRNA *prop;
+
+	prop = RNA_def_property(ot->srna, "target_location", PROP_FLOAT, PROP_XYZ);
+	RNA_def_property_array(prop, 3);
+	RNA_def_property_ui_text(prop, "Target", "Target location where normals will point");
+
+	prop = RNA_def_boolean(ot->srna, "spherize", false, "Spherize Normal", "Add normal vector of target to custom normal with given proportion");
+
+	prop = RNA_def_float(ot->srna, "strength", 0.1, 0.0f, 1.0f, "Strength", "Ratio of spherized normal to original normal", 0.0f, 1.0f);
+}
+
+/********************** Split/Merge Loop Normals **********************/
+
+static void custom_loops_tag(BMesh *bm)
+{
+	BMFace *f;
+	BMEdge *e;
+	BMIter fiter, eiter;
+	BMLoop *l_curr, *l_first;
+
+	BM_ITER_MESH(e, &eiter, bm, BM_EDGES_OF_MESH) {
+		BMLoop *l_a, *l_b;
+
+		BM_elem_flag_disable(e, BM_ELEM_TAG);
+		if (BM_edge_loop_pair(e, &l_a, &l_b)) {
+			if (BM_elem_flag_test(e, BM_ELEM_SMOOTH) && l_a->v != l_b->v) {
+				BM_elem_flag_enable(e, BM_ELEM_TAG);
+			}
+		}
+	}
+
+	int index_face, index_loop = 0;
+	BM_ITER_MESH_INDEX(f, &fiter, bm, BM_FACES_OF_MESH, index_face) {
+		BM_elem_index_set(f, index_face);
+		l_curr = l_first = BM_FACE_FIRST_LOOP(f);
+		do {
+			BM_elem_index_set(l_curr, index_loop++);
+			BM_elem_flag_disable(l_curr, BM_ELEM_TAG);
+		} while ((l_curr = l_curr->next) != l_first);
+	}
+}
+
+static bool merge_loop(bContext *C, wmOperator *op, LoopNormalData *ld)
+{
+	Object *obedit = CTX_data_edit_object(C);
+	BMEditMesh *em = BKE_editmesh_from_object(obedit);
+	BMesh *bm = em->bm;
+
+	TransDataLoopNormal *tld = ld->normal;
+
+	BLI_SMALLSTACK_DECLARE(clnors, short *);
+
+	for (int i = 0; i < ld->totloop; i++, tld++) {
+		if (tld->loop_index == -1)
+			continue;
+
+		MLoopNorSpace *lnor_space = bm->lnor_spacearr->lspacearr[tld->loop_index];
+
+		if (lnor_space->loops) {
+
+			LinkNode *loops = lnor_space->loops;
+			float avg_normal[3] = { 0, 0, 0 };
+			short *clnors_data;
+
+			while (loops) {
+				const int loop_index = GET_INT_FROM_POINTER(loops->link);
+
+				TransDataLoopNormal *temp = ld->normal;
+				for (int j = 0; j < ld->totloop; j++, temp++) {
+					if (loop_index == temp->loop_index) {
+						add_v3_v3(avg_normal, temp->nloc);
+						BLI_SMALLSTACK_PUSH(clnors, temp->clnors_data);
+						temp->loop_index = -1;
+					}
+				}
+				loops = loops->next;
+			}
+			if (len_squared_v3(avg_normal) < 1e-4f) {		/* if avg normal is nearly 0, set clnor to default value */
+				while ((clnors_data = BLI_SMALLSTACK_POP(clnors))) {
+					copy_v2_v2_short(clnors_data, (short[2]) { 0, 0 });
+				}
+			}
+			else {
+				normalize_v3(avg_normal);					/* else set all clnors to this avg */
+				while ((clnors_data = BLI_SMALLSTACK_POP(clnors))) {
+					BKE_lnor_space_custom_normal_to_data(lnor_space, avg_normal, clnors_data);
+				}
+			}
+		}
+	}
+	return true;
+}
+
+static bool split_loop(bContext *C, wmOperator *op, LoopNormalData *ld)
+{
+	Object *obedit = CTX_data_edit_object(C);
+	BMEditMesh *em = BKE_editmesh_from_object(obedit);
+	BMesh *bm = em->bm;
+	BMFace *f;
+	BMLoop *l, *l_curr, *l_first;
+	BMIter fiter;
+
+	custom_loops_tag(bm);
+
+	int cd_clnors_offset = CustomData_get_offset(&bm->ldata, CD_CUSTOMLOOPNORMAL);
+	BM_ITER_MESH(f, &fiter, bm, BM_FACES_OF_MESH) {
+		l_curr = l_first = BM_FACE_FIRST_LOOP(f);
+		do {
+			if (BM_elem_flag_test(l_curr->v, BM_ELEM_SELECT) && (!BM_elem_flag_test(l_curr->e, BM_ELEM_TAG)
+				|| (!BM_elem_flag_test(l_curr, BM_ELEM_TAG) && bm_mesh_loop_check_cyclic_smooth_fan(l_curr)))) {
+
+				if (!BM_elem_flag_test(l_curr->e, BM_ELEM_TAG) && !BM_elem_flag_test(l_curr->prev->e, BM_ELEM_TAG))
+				{
+					int loop_index = BM_elem_index_get(l_curr);
+					short *clnors = BM_ELEM_CD_GET_VOID_P(l_curr, cd_clnors_offset);
+					BKE_lnor_space_custom_normal_to_data(bm->lnor_spacearr->lspacearr[loop_index], f->no, clnors);
+				}
+				else {
+					BMVert *v_pivot = l_curr->v;
+					BMEdge *e_next;
+					const BMEdge *e_org = l_curr->e;
+					BMLoop *lfan_pivot, *lfan_pivot_next;
+
+					lfan_pivot = l_curr;
+					e_next = lfan_pivot->e;
+					BLI_SMALLSTACK_DECLARE(loops, BMLoop *);
+					float avg_normal[3] = { 0 };
+
+					while (true) {
+						lfan_pivot_next = BM_vert_step_fan_loop(lfan_pivot, &e_next);
+						if (lfan_pivot_next) {
+							BLI_assert(lfan_pivot_next->v == v_pivot);
+						}
+						else {
+							e_next = (lfan_pivot->e == e_next) ? lfan_pivot->prev->e : lfan_pivot->e;
+						}
+
+						BLI_SMALLSTACK_PUSH(loops, lfan_pivot);
+						add_v3_v3(avg_normal, lfan_pivot->f->no);
+
+						if (!BM_elem_flag_test(e_next, BM_ELEM_TAG) || (e_next == e_org)) {
+							break;
+						}
+						lfan_pivot = lfan_pivot_next;
+					}
+					normalize_v3(avg_normal);
+					while ((l = BLI_SMALLSTACK_POP(loops))) {
+						int l_index = BM_elem_index_get(l);
+						short *clnors = BM_ELEM_CD_GET_VOID_P(l, cd_clnors_offset);
+						BKE_lnor_space_custom_normal_to_data(bm->lnor_spacearr->lspacearr[l_index], avg_normal, clnors);
+					}
+				}
+			}
+		} while ((l_curr = l_curr->next) != l_first);
+	}
+	return true;
+}
+
+static int edbm_split_merge_loop_normals_exec(bContext *C, wmOperator *op)
+{
+	Object *obedit = CTX_data_edit_object(C);
+	BMEditMesh *em = BKE_editmesh_from_object(obedit);
+	BMesh *bm = em->bm;
+	BMEdge *e;
+	BMIter eiter;
+
+	BM_lnorspace_update(bm);
+
+	LoopNormalData *ld = BM_loop_normal_init(bm);
+
+	const bool merge = RNA_struct_find_property(op->ptr, "merge_type") != NULL;
+
+	mesh_set_smooth_faces(em, merge);
+
+	BM_ITER_MESH(e, &eiter, bm, BM_EDGES_OF_MESH) {
+		if (BM_elem_flag_test(e, BM_ELEM_SELECT)) {
+			BM_elem_flag_set(e, BM_ELEM_SMOOTH, merge);
+		}
+	}
+	if (merge == 0) {
+		Mesh *me = obedit->data;
+		me->drawflag |= ME_DRAWSHARP;
+	}
+
+	bm->spacearr_dirty |= BM_SPACEARR_DIRTY_ALL;
+	BM_lnorspace_update(bm);
+
+	bool handled = false;
+	
+	if (merge) {
+		handled = merge_loop(C, op, ld);
+	}
+	else {
+		handled = split_loop(C, op, ld);
+	}
+	MEM_freeN(ld->normal);
+	MEM_freeN(ld);
+
+	if (!handled) {
+		return OPERATOR_CANCELLED;
+	}
+
+	EDBM_update_generic(em, true, false);
+
+	return OPERATOR_FINISHED;
+}
+
+void MESH_OT_merge_loop_normals(struct wmOperatorType *ot)
+{
+	/* identifiers */
+	ot->name = "Merge Loop";
+	ot->description = "Merge loop normals of selected vertices";
+	ot->idname = "MESH_OT_merge_loop_normals";
+
+	/* api callbacks */
+	ot->exec = edbm_split_merge_loop_normals_exec;
+	ot->poll = ED_operator_editmesh_auto_smooth;
+
+	/* flags */
+	ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+
+	ot->prop = RNA_def_boolean(ot->srna, "merge_type", 0, "merge", "Merge split normals");
+	RNA_def_property_flag(ot->prop, PROP_HIDDEN);
+}
+
+void MESH_OT_split_loop_normals(struct wmOperatorType *ot)
+{
+	/* identifiers */
+	ot->name = "Split Loop";
+	ot->description = "Split loop normals of selected vertices";
+	ot->idname = "MESH_OT_split_loop_normals";
+
+	/* api callbacks */
+	ot->exec = edbm_split_merge_loop_normals_exec;
+	ot->poll = ED_operator_editmesh_auto_smooth;
+
+	/* flags */
+	ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+}
+
+/********************** Average Loop Normals **********************/
+
+enum {
+	LOOP_AVERAGE = 1,
+	FACE_AREA_AVERAGE = 2,
+	ANGLE_AVERAGE = 3,
+};
+
+static EnumPropertyItem average_method_items[] = {
+	{ LOOP_AVERAGE, "Custom Normal", 0, "Custom Normal", "Take Average of vert Normals" },
+	{ FACE_AREA_AVERAGE, "Face Area", 0, "Face Area", "Set all vert normals by Face Area"},
+	{ ANGLE_AVERAGE, "Corner Angle", 0, "Corner Angle", "Set all vert normals by Corner Angle" },
+	{ 0, NULL, 0, NULL, NULL }
+};
+
+static int edbm_average_loop_normals_exec(bContext *C, wmOperator *op)
+{
+	Object *obedit = CTX_data_edit_object(C);
+	BMEditMesh *em = BKE_editmesh_from_object(obedit);
+	BMesh *bm = em->bm;
+	BMFace *f;
+	BMLoop *l, *l_curr, *l_first;
+	BMIter fiter;
+
+	bm->spacearr_dirty |= BM_SPACEARR_DIRTY_ALL;
+	BM_lnorspace_update(bm);
+
+	const int average_type = RNA_enum_get(op->ptr, "average_type");
+	int cd_clnors_offset = CustomData_get_offset(&bm->ldata, CD_CUSTOMLOOPNORMAL);
+	float absweight = (float) RNA_int_get(op->ptr, "weight"), threshold = RNA_float_get(op->ptr, "threshold");
+	float weight = absweight / 50.0f;
+
+	if (average_type == LOOP_AVERAGE) {
+		PropertyRNA *prop = RNA_struct_find_property(op->ptr, "weight");
+		RNA_def_property_flag(prop, PROP_HIDDEN);
+		prop = RNA_struct_find_property(op->ptr, "threshold");
+		RNA_def_property_flag(prop, PROP_HIDDEN);
+	}
+	else {
+		PropertyRNA *prop = RNA_struct_find_property(op->ptr, "weight");
+		RNA_def_property_clear_flag(prop, PROP_HIDDEN);
+		prop = RNA_struct_find_property(op->ptr, "threshold");
+		RNA_def_property_clear_flag(prop, PROP_HIDDEN);
+	}
+
+	if (absweight == 100) {
+		weight = (float)SHRT_MAX;
+	}
+	else if (absweight == 1) {
+		weight = 1 / (float)SHRT_MAX;
+	}
+	else if ((weight - 1) * 25 > 1) {
+		weight = (weight - 1) * 25;
+	}
+
+	custom_loops_tag(bm);
+
+	Heap *loop_weight = BLI_heap_new();
+
+	BM_ITER_MESH(f, &fiter, bm, BM_FACES_OF_MESH) {
+
+		l_curr = l_first = BM_FACE_FIRST_LOOP(f);
+		do {
+			if (BM_elem_flag_test(l_curr->v, BM_ELEM_SELECT) && (!BM_elem_flag_test(l_curr->e, BM_ELEM_TAG)
+				|| (!BM_elem_flag_test(l_curr, BM_ELEM_TAG) && bm_mesh_loop_check_cyclic_smooth_fan(l_curr)))) {
+
+				if (!BM_elem_flag_test(l_curr->e, BM_ELEM_TAG) && !BM_elem_flag_test(l_curr->prev->e, BM_ELEM_TAG))
+				{
+					int loop_index = BM_elem_index_get(l_curr);
+					short *clnors = BM_ELEM_CD_GET_VOID_P(l_curr, cd_clnors_offset);
+					BKE_lnor_space_custom_normal_to_data(bm->lnor_spacearr->lspacearr[loop_index], f->no, clnors);
+				}
+				else {
+					BMVert *v_pivot = l_curr->v;
+					BMEdge *e_next;
+					const BMEdge *e_org = l_curr->e;
+					BMLoop *lfan_pivot, *lfan_pivot_next;
+
+					lfan_pivot = l_curr;
+					e_next = lfan_pivot->e;
+
+					while (true) {
+						lfan_pivot_next = BM_vert_step_fan_loop(lfan_pivot, &e_next);
+						if (lfan_pivot_next) {
+							BLI_assert(lfan_pivot_next->v == v_pivot);
+						}
+						else {
+							e_next = (lfan_pivot->e == e_next) ? lfan_pivot->prev->e : lfan_pivot->e;
+						}
+
+						float val = 1.0f;
+						if (average_type == FACE_AREA_AVERAGE) {
+							val = 1.0f / BM_face_calc_area(lfan_pivot->f);
+						}
+						else if (average_type == ANGLE_AVERAGE) {
+							val = 1.0f / BM_loop_calc_face_angle(lfan_pivot);
+						}
+
+						BLI_heap_insert(loop_weight, val, lfan_pivot);
+
+						if (!BM_elem_flag_test(e_next, BM_ELEM_TAG) || (e_next == e_org)) {
+							break;
+						}
+						lfan_pivot = lfan_pivot_next;
+					}
+
+					BLI_SMALLSTACK_DECLARE(loops, BMLoop *);
+					float wnor[3], avg_normal[3] = { 0 };
+					float val = BLI_heap_node_value(BLI_heap_top(loop_weight)), count = 0;
+
+					while (!BLI_heap_is_empty(loop_weight)) {
+						float cur_val = BLI_heap_node_value(BLI_heap_top(loop_weight));
+						if (!compare_ff(val, cur_val, threshold)) {
+							count++;
+							val = cur_val;
+						}
+						l = BLI_heap_popmin(loop_weight);
+						BLI_SMALLSTACK_PUSH(loops, l);
+
+						float n_weight = pow(weight, count);
+
+						if (average_type == LOOP_AVERAGE) {
+							int l_index = BM_elem_index_get(l);
+							short *clnors = BM_ELEM_CD_GET_VOID_P(l, cd_clnors_offset);
+							BKE_lnor_space_custom_data_to_normal(bm->lnor_spacearr->lspacearr[l_index], clnors, wnor);
+						}
+						else {
+							copy_v3_v3(wnor, l->f->no);
+						}
+						mul_v3_fl(wnor, (1.0f / cur_val) * (1.0f / n_weight));
+						add_v3_v3(avg_normal, wnor);
+					}
+
+					normalize_v3(avg_normal);
+
+					while ((l = BLI_SMALLSTACK_POP(loops))) {
+						int l_index = BM_elem_index_get(l);
+						short *clnors = BM_ELEM_CD_GET_VOID_P(l, cd_clnors_offset);
+						BKE_lnor_space_custom_normal_to_data(bm->lnor_spacearr->lspacearr[l_index], avg_normal, clnors);
+					}
+				}
+			}
+		} while ((l_curr = l_curr->next) != l_first);
+	}
+
+	BLI_heap_free(loop_weight, NULL);
+	EDBM_update_generic(em, true, false);
+
+	return OPERATOR_FINISHED;
+}
+
+void MESH_OT_average_loop_normals(struct wmOperatorType *ot)
+{
+	/* identifiers */
+	ot->name = "Average";
+	ot->description = "Average loop normals of selected vertices";
+	ot->idname = "MESH_OT_average_loop_normals";
+
+	/* api callbacks */
+	ot->exec = edbm_average_loop_normals_exec;
+	ot->poll = ED_operator_editmesh_auto_smooth;
+
+	/* flags */
+	ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+
+	ot->prop = RNA_def_enum(ot->srna, "average_type", average_method_items, LOOP_AVERAGE, "Type", "Averaging method");
+	RNA_def_property_flag(ot->prop, PROP_HIDDEN);
+
+	ot->prop = RNA_def_int(ot->srna, "weight", 50, 1, 100, "Weight", "Weight applied per face", 1, 100);
+
+	ot->prop = RNA_def_float(ot->srna, "threshold", 0.01f, 0, 10, "Threshold", "Threshold value for different weights to be considered equal", 0, 5);
+}
+
+/********************** Custom Normal Interface Tools **********************/
+
+enum {
+	COPY = 1,
+	PASTE = 2,
+	MULTIPLY = 3,
+	ADD = 4,
+	RESET = 5,
+};
+
+static EnumPropertyItem normal_vector_tool_items[] = {
+	{ COPY, "Copy", 0, "Copy Normal", "Copy normal to buffer" },
+	{ PASTE, "Paste", 0, "Paste Normal", "Paste normal from buffer" },
+	{ ADD, "Add", 0, "Add Normal", "Add normal vector with selection" },
+	{ MULTIPLY, "Multiply", 0, "Multiply Normal", "Multiply normal vector with selection" },
+	{ RESET, "Reset", 0, "Reset Normal", "Reset buffer and/or normal of selected element" },
+	{ 0, NULL, 0, NULL, NULL }
+};
+
+static int edbm_custom_normal_tools_exec(bContext *C, wmOperator *op)
+{
+	Object *obedit = CTX_data_edit_object(C);
+	Scene *scene = CTX_data_scene(C);
+	BMEditMesh *em = BKE_editmesh_from_object(obedit);
+	BMesh *bm = em->bm;
+
+	int mode = RNA_enum_get(op->ptr, "mode");
+	const bool absolute = RNA_boolean_get(op->ptr, "absolute");
+
+	BM_lnorspace_update(bm);
+	LoopNormalData *ld = BM_loop_normal_init(bm);
+	TransDataLoopNormal *tld = ld->normal;
+
+	float *normal_vector = scene->toolsettings->normal_vector;
+
+	PropertyRNA *prop = RNA_struct_find_property(op->ptr, "absolute");
+	if (mode == PASTE) {
+		if (!absolute) {
+			normalize_v3(normal_vector);
+		}
+		RNA_def_property_clear_flag(prop, PROP_HIDDEN);
+	}
+	else {
+		RNA_def_property_flag(prop, PROP_HIDDEN);
+	}
+
+	switch (mode) {
+		case COPY: 
+			if (bm->totfacesel != 1 && ld->totloop != 1 && bm->totvertsel != 1) {
+				BKE_report(op->reports, RPT_ERROR, "Can only copy Split normal, Averaged vertex normal or Face normal");
+				MEM_freeN(ld->normal);
+				MEM_freeN(ld);
+				return OPERATOR_CANCELLED;
+			}
+			bool join = ld->totloop > 0 ? true : false;
+			for (int i = 0; i < ld->totloop; i++, tld++) {
+				if (!compare_v3v3(ld->normal->nloc, tld->nloc, 1e-4f))
+					join = false;
+			}
+			if (bm->totfacesel == 1) {
+				BMFace *f;
+				BMIter fiter;
+				BM_ITER_MESH(f, &fiter, bm, BM_FACES_OF_MESH) {
+					if (BM_elem_flag_test(f, BM_ELEM_SELECT)) {
+						copy_v3_v3(scene->toolsettings->normal_vector, f->no);
+					}
+				}
+			}
+			else if (ld->totloop == 1 || join) {
+				copy_v3_v3(scene->toolsettings->normal_vector, ld->normal->nloc);
+			}
+			else if (!join) {
+				BKE_report(op->reports, RPT_ERROR, "Can only copy Split normal, Averaged vertex normal or Face normal");
+				MEM_freeN(ld->normal);
+				MEM_freeN(ld);
+				return OPERATOR_CANCELLED;
+			}
+			break;
+
+		case PASTE:
+			for (int i = 0; i < ld->totloop; i++, tld++) {
+				if (absolute) {
+					float abs_normal[3];
+					copy_v3_v3(abs_normal, tld->loc);
+					negate_v3(abs_normal);
+					add_v3_v3(abs_normal, normal_vector);
+					normalize_v3(abs_normal);
+
+					BKE_lnor_space_custom_normal_to_data(bm->lnor_spacearr->lspacearr[tld->loop_index], abs_normal, tld->clnors_data);
+				}
+				else {
+					BKE_lnor_space_custom_normal_to_data(bm->lnor_spacearr->lspacearr[tld->loop_index], normal_vector, tld->clnors_data);
+				}
+			}
+			break;
+
+		case MULTIPLY:
+			for (int i = 0; i < ld->totloop; i++, tld++) {
+				mul_v3_v3(tld->nloc, normal_vector);
+				normalize_v3(tld->nloc);
+				BKE_lnor_space_custom_normal_to_data(bm->lnor_spacearr->lspacearr[tld->loop_index], tld->nloc, tld->clnors_data);
+			}
+			break;
+
+		case ADD:
+			for (int i = 0; i < ld->totloop; i++, tld++) {
+				add_v3_v3(tld->nloc, normal_vector);
+				normalize_v3(tld->nloc);
+				BKE_lnor_space_custom_normal_to_data(bm->lnor_spacearr->lspacearr[tld->loop_index], tld->nloc, tld->clnors_data);
+			}
+			break;
+
+		case RESET:
+			zero_v3(normal_vector);
+			for (int i = 0; i < ld->totloop; i++, tld++) {
+				zero_v3(tld->nloc);
+				BKE_lnor_space_custom_normal_to_data(bm->lnor_spacearr->lspacearr[tld->loop_index], tld->nloc, tld->clnors_data);
+			}
+			break;
+
+		default:
+			BLI_assert(0);
+			break;
+	}
+
+	MEM_freeN(ld->normal);
+	MEM_freeN(ld);
+
+	EDBM_update_generic(em, true, false);
+	return OPERATOR_FINISHED;
+}
+
+void MESH_OT_custom_normal_tools(struct wmOperatorType *ot)
+{
+	/* identifiers */
+	ot->name = "Custom Normal Vector tools";
+	ot->description = "Normal tools using Normal Vector of Interface";
+	ot->idname = "MESH_OT_custom_normal_tools";
+
+	/* api callbacks */
+	ot->exec = edbm_custom_normal_tools_exec;
+	ot->poll = ED_operator_editmesh_auto_smooth;
+
+	/* flags */
+	ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+
+	ot->prop = RNA_def_enum(ot->srna, "mode", normal_vector_tool_items, COPY, "Mode", "Mode of tools taking input from Interface");
+	RNA_def_property_flag(ot->prop, PROP_HIDDEN);
+
+	PropertyRNA *prop = RNA_def_boolean(ot->srna, "absolute", 0, "Absolute Coordinates", "Copy Absolute coordinates or Normal vector");
+}
+
+static int edbm_set_normals_from_faces_exec(bContext *C, wmOperator *op)
+{
+	Object *obedit = CTX_data_edit_object(C);
+	BMEditMesh *em = BKE_editmesh_from_object(obedit);
+	BMesh *bm = em->bm;
+	BMFace *f;
+	BMVert *v;
+	BMEdge *e;
+	BMLoop *l;
+	BMIter fiter, viter, eiter, liter;
+
+	const bool keep_sharp = RNA_boolean_get(op->ptr, "keep_sharp");
+
+	BM_lnorspace_update(bm);
+
+	float(*vnors)[3] = MEM_callocN(sizeof(*vnors) * bm->totvert, "__func__");
+	BM_ITER_MESH(f, &fiter, bm, BM_FACES_OF_MESH) {
+		if (BM_elem_flag_test(f, BM_ELEM_SELECT)) {
+			BM_ITER_ELEM(v, &viter, f, BM_VERTS_OF_FACE) {
+				int v_index = BM_elem_index_get(v);
+				add_v3_v3(vnors[v_index], f->no);
+			}
+		}
+	}
+	for (int i = 0; i < bm->totvert; i++) {
+		if (!is_zero_v3(vnors[i]))
+			normalize_v3(vnors[i]);
+	}
+
+	BLI_bitmap *loop_set = BLI_BITMAP_NEW(bm->totloop, "__func__");
+	int cd_clnors_offset = CustomData_get_offset(&bm->ldata, CD_CUSTOMLOOPNORMAL);
+
+	BM_ITER_MESH(f, &fiter, bm, BM_FACES_OF_MESH) {
+		BM_ITER_ELEM(e, &eiter, f, BM_EDGES_OF_FACE) {
+			if (!keep_sharp || (BM_elem_flag_test(e, BM_ELEM_SMOOTH) && BM_elem_flag_test(e, BM_ELEM_SELECT))) {
+
+				BM_ITER_ELEM(v, &viter, e, BM_VERTS_OF_EDGE) {
+					l = BM_face_vert_share_loop(f, v);
+					int loop_index = BM_elem_index_get(l);
+					int v_index = BM_elem_index_get(l->v);
+					BLI_assert(l->f == f);
+					BLI_assert(l->v == v);
+					if (!is_zero_v3(vnors[v_index])) {
+						LinkNode *loops = bm->lnor_spacearr->lspacearr[loop_index]->loops;
+						short *clnors = BM_ELEM_CD_GET_VOID_P(l, cd_clnors_offset);
+						BKE_lnor_space_custom_normal_to_data(bm->lnor_spacearr->lspacearr[loop_index], vnors[v_index], clnors);
+
+						while (loops) {
+							int loop_index = GET_INT_FROM_POINTER(loops->link);
+							BLI_BITMAP_ENABLE(loop_set, loop_index);
+							loops = loops->next;
+						}
+					}
+				}
+			}
+		}
+	}
+
+	int v_index;
+	BM_ITER_MESH_INDEX(v, &viter, bm, BM_VERTS_OF_MESH, v_index) {
+		BM_ITER_ELEM(l, &liter, v, BM_LOOPS_OF_VERT) {
+			if (BLI_BITMAP_TEST(loop_set, BM_elem_index_get(l))) {
+				int loop_index = BM_elem_index_get(l);
+				short *clnors = BM_ELEM_CD_GET_VOID_P(l, cd_clnors_offset);
+				BKE_lnor_space_custom_normal_to_data(bm->lnor_spacearr->lspacearr[loop_index], vnors[v_index], clnors);
+			}
+		}
+	}
+
+	MEM_freeN(loop_set);
+	MEM_freeN(vnors);
+	EDBM_update_generic(em, true, false);
+
+	return OPERATOR_FINISHED;
+}
+
+void MESH_OT_set_normals_from_faces(struct wmOperatorType *ot)
+{
+	/* identifiers */
+	ot->name = "Set Normals from faces";
+	ot->description = "Set the custom vertex normals from the selected faces ones";
+	ot->idname = "MESH_OT_set_normals_from_faces";
+
+	/* api callbacks */
+	ot->exec = edbm_set_normals_from_faces_exec;
+	ot->poll = ED_operator_editmesh_auto_smooth;
+
+	/* flags */
+	ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+
+	ot->prop = RNA_def_boolean(ot->srna, "keep_sharp", 0, "Keep Sharp Edges", "Do not set sharp edges to face");
+}
+
+static int edbm_smoothen_normals_exec(bContext *C, wmOperator *op)
+{
+	Object *obedit = CTX_data_edit_object(C);
+	BMEditMesh *em = BKE_editmesh_from_object(obedit);
+	BMesh *bm = em->bm;
+	BMFace *f;
+	BMLoop *l;
+	BMIter fiter, liter;
+
+	BM_lnorspace_update(bm);
+	LoopNormalData *ld = BM_loop_normal_init(bm);
+
+	BMLoop **loop_at_index = MEM_mallocN(sizeof(*loop_at_index) * bm->totloop, "__func__");
+	float(*smooth_normal)[3] = MEM_callocN(sizeof(*smooth_normal) * ld->totloop, "__func__");
+
+	BM_ITER_MESH(f, &fiter, bm, BM_FACES_OF_MESH) {
+		BM_ITER_ELEM(l, &liter, f, BM_LOOPS_OF_FACE) {
+			loop_at_index[BM_elem_index_get(l)] = l;
+		}
+	}
+
+	TransDataLoopNormal *tld = ld->normal;
+
+	for (int i = 0; i < ld->totloop; i++, tld++) {
+		BMLoop *l = loop_at_index[tld->loop_index];
+		float loop_normal[3];
+
+		BM_ITER_ELEM(f, &fiter, l->v, BM_FACES_OF_VERT) {
+			BMLoop *l_other;
+			BM_ITER_ELEM(l_other, &liter, f, BM_LOOPS_OF_FACE) {
+				int index_other = BM_elem_index_get(l_other);
+				short *clnors = BM_ELEM_CD_GET_VOID_P(l_other, ld->offset);
+				BKE_lnor_space_custom_data_to_normal(bm->lnor_spacearr->lspacearr[index_other], clnors, loop_normal);
+				add_v3_v3(smooth_normal[i], loop_normal);
+			}
+		}
+		normalize_v3(smooth_normal[i]);
+	}
+
+	float factor = RNA_float_get(op->ptr, "factor");
+	tld = ld->normal;
+
+	for (int i = 0; i < ld->totloop; i++, tld++) {
+		float current_normal[3];
+
+		BKE_lnor_space_custom_data_to_normal(bm->lnor_spacearr->lspacearr[tld->loop_index], tld->clnors_data, current_normal);
+
+		mul_v3_fl(current_normal, 1.0f - factor);
+		mul_v3_fl(smooth_normal[i], factor);
+		add_v3_v3(current_normal, smooth_normal[i]);
+		normalize_v3(current_normal);
+
+		BKE_lnor_space_custom_normal_to_data(bm->lnor_spacearr->lspacearr[tld->loop_index], current_normal, tld->clnors_data);
+	}
+
+	MEM_freeN(ld->normal);
+	MEM_freeN(ld);
+	MEM_freeN(loop_at_index);
+	MEM_freeN(smooth_normal);
+
+	EDBM_update_generic(em, true, false);
+
+	return OPERATOR_FINISHED;
+}
+
+void MESH_OT_smoothen_custom_normals(struct wmOperatorType *ot)
+{
+	/* identifiers */
+	ot->name = "Smoothen Custom Normal";
+	ot->description = "Smoothen custom normal based on adjacent vertex normals";
+	ot->idname = "MESH_OT_smoothen_custom_normals";
+
+	/* api callbacks */
+	ot->exec = edbm_smoothen_normals_exec;
+	ot->poll = ED_operator_editmesh_auto_smooth;
+
+	/* flags */
+	ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+
+	ot->prop = RNA_def_float(ot->srna, "factor", 0.5f, 0.0f, 1.0f, "Factor", "Specifies weight of smooth vs original normal", 0.0f, 1.0f);
+}
+
+/********************** Weighted Normal Modifier Face Strength **********************/
+
+static int edbm_mod_weighted_strength_exec(bContext *C, wmOperator *op)
+{
+	Scene *scene = CTX_data_scene(C);
+	Object *obedit = CTX_data_edit_object(C);
+	BMEditMesh *em = BKE_editmesh_from_object(obedit);
+	BMesh *bm = em->bm;
+	BMFace *f;
+	BMIter fiter;
+	
+	BM_select_history_clear(bm);
+
+	int cd_prop_int_offset = CustomData_get_offset(&bm->pdata, CD_PROP_INT);
+	if (cd_prop_int_offset == -1) {
+		BM_data_layer_add(bm, &bm->pdata, CD_PROP_INT);
+		cd_prop_int_offset = CustomData_get_offset(&bm->pdata, CD_PROP_INT);
+	}
+
+	const int face_strength = scene->toolsettings->face_strength;
+	const bool set = RNA_boolean_get(op->ptr, "set");
+	BM_mesh_elem_index_ensure(bm, BM_FACE);
+
+	if (set) {
+		BM_ITER_MESH(f, &fiter, bm, BM_FACES_OF_MESH) {
+			if (BM_elem_flag_test(f, BM_ELEM_SELECT)) {
+				int *strength = BM_ELEM_CD_GET_VOID_P(f, cd_prop_int_offset);
+				*strength = face_strength;
+			}
+		}
+	}
+	else {
+		BM_ITER_MESH(f, &fiter, bm, BM_FACES_OF_MESH) {
+			int *strength = BM_ELEM_CD_GET_VOID_P(f, cd_prop_int_offset);
+			if (*strength == face_strength) {
+				BM_face_select_set(bm, f, true);
+				BM_select_history_store(bm, f);
+			}
+			else {
+				BM_face_select_set(bm, f, false);
+			}
+		}
+	}
+
+	EDBM_update_generic(em, false, false);
+	return OPERATOR_FINISHED;
+}
+
+void MESH_OT_mod_weighted_strength(struct wmOperatorType *ot)
+{
+	/* identifiers */
+	ot->name = "Face Strength";
+	ot->description = "Set/Get strength of face. Used in Weighted Normal Modifier";
+	ot->idname = "MESH_OT_mod_weighted_strength";
+
+	/* api callbacks */
+	ot->exec = edbm_mod_weighted_strength_exec;
+	ot->poll = ED_operator_editmesh_auto_smooth;
+
+	/* flags */
+	ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+
+	ot->prop = RNA_def_boolean(ot->srna, "set", 0, "Set value", "Set Value of faces");
+	RNA_def_property_flag(ot->prop, PROP_HIDDEN);
+}

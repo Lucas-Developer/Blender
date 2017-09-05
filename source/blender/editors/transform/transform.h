@@ -536,6 +536,7 @@ typedef struct TransInfo {
 	/** #TransInfo.center has been set, don't change it. */
 #define T_OVERRIDE_CENTER	(1 << 25)
 
+#define T_CLNOR_REBUILD		(1 << 26)
 /* TransInfo->modifiers */
 #define	MOD_CONSTRAINT_SELECT	0x01
 #define	MOD_PRECISION			0x02
@@ -797,6 +798,8 @@ bool applyTransformOrientation(const struct bContext *C, float mat[3][3], char r
 
 int getTransformOrientation_ex(const struct bContext *C, float normal[3], float plane[3], const short around);
 int getTransformOrientation(const struct bContext *C, float normal[3], float plane[3]);
+
+void freeCustomNormalArray(TransInfo *t, TransCustomData *custom_data);
 
 void freeEdgeSlideTempFaces(EdgeSlideData *sld);
 void freeEdgeSlideVerts(TransInfo *t, TransCustomData *custom_data);
