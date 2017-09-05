@@ -192,15 +192,6 @@ void ED_operatortypes_mesh(void)
 	WM_operatortype_append(MESH_OT_symmetrize);
 	WM_operatortype_append(MESH_OT_symmetry_snap);
 
-	WM_operatortype_append(MESH_OT_point_normals);
-	WM_operatortype_append(MESH_OT_merge_loop_normals);
-	WM_operatortype_append(MESH_OT_split_loop_normals);
-	WM_operatortype_append(MESH_OT_custom_normal_tools);
-	WM_operatortype_append(MESH_OT_set_normals_from_faces);
-	WM_operatortype_append(MESH_OT_average_loop_normals);
-	WM_operatortype_append(MESH_OT_smoothen_custom_normals);
-	WM_operatortype_append(MESH_OT_mod_weighted_strength);
-
 #ifdef WITH_GAMEENGINE
 	WM_operatortype_append(MESH_OT_navmesh_make);
 	WM_operatortype_append(MESH_OT_navmesh_face_copy);
@@ -431,8 +422,6 @@ void ED_keymap_mesh(wmKeyConfig *keyconf)
 	WM_keymap_add_item(keymap, "MESH_OT_separate", PKEY, KM_PRESS, 0, 0);
 	WM_keymap_add_item(keymap, "MESH_OT_split", YKEY, KM_PRESS, 0, 0);
 	WM_keymap_add_item(keymap, "MESH_OT_vert_connect_path", JKEY, KM_PRESS, 0, 0);
-
-	WM_keymap_add_item(keymap, "MESH_OT_point_normals", LKEY, KM_PRESS, KM_ALT, 0);
 
 	/* Vertex Slide */
 	WM_keymap_add_item(keymap, "TRANSFORM_OT_vert_slide", VKEY, KM_PRESS, KM_SHIFT, 0);
